@@ -428,10 +428,6 @@ async def compose_timeline(
 
 # Create ADK tool
 if ADK_AVAILABLE:
-    compose_timeline_tool = FunctionTool(
-        compose_timeline,
-        name="compose_timeline",
-        description="Execute an AI-generated edit plan to create video timeline"
-    )
+    compose_timeline_tool = FunctionTool(compose_timeline)
 else:
     compose_timeline_tool = None

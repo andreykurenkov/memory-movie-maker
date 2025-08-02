@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import patch, Mock, AsyncMock
 import tempfile
+import os
 import gradio as gr
 
 from memory_movie_maker.web.app import MemoryMovieMakerApp

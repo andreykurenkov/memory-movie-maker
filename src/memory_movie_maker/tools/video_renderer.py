@@ -353,8 +353,4 @@ async def render_video(
 
 
 # Create ADK tool
-render_video_tool = FunctionTool(
-    render_video,
-    name="render_video",
-    description="Render video file from timeline"
-)
+render_video_tool = FunctionTool(render_video)

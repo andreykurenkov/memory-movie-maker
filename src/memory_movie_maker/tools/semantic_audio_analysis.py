@@ -21,9 +21,16 @@ class AudioSegment(BaseModel):
     start_time: float = Field(..., ge=0, description="Start time in seconds")
     end_time: float = Field(..., ge=0, description="End time in seconds")
     content: str = Field(..., description="What is said or happens in this segment")
-    type: str = Field(..., description="Type: speech, music, sound_effect, silence")
+    type: str = Field(..., description="Type: speech, music, sound_effect, silence, intro, verse, chorus, bridge, outro, drop, buildup")
     speaker: Optional[str] = Field(None, description="Speaker identification if speech")
     importance: float = Field(..., ge=0, le=1, description="Importance for video timeline")
+    
+    # Musical structure fields
+    musical_structure: Optional[str] = Field(None, description="Musical section type: intro, verse, chorus, bridge, outro, drop, buildup, break")
+    energy_transition: Optional[str] = Field(None, description="Energy change: building, dropping, steady, peak, valley")
+    musical_elements: Optional[List[str]] = Field(None, description="Active elements: vocals, drums, bass, melody, harmony, effects")
+    tempo_change: Optional[str] = Field(None, description="Tempo change if any: accelerating, decelerating, steady")
+    sync_priority: Optional[float] = Field(None, ge=0, le=1, description="Priority for video sync (1.0 = must sync here)")
 
 
 class SemanticAudioAnalysis(BaseModel):
@@ -39,6 +46,11 @@ class SemanticAudioAnalysis(BaseModel):
         default_factory=dict, 
         description="Non-speech sounds and their timestamps or ranges"
     )
+    
+    # Musical structure overview (for music files)
+    musical_structure_summary: Optional[str] = Field(None, description="Overview of song structure")
+    energy_peaks: Optional[List[float]] = Field(None, description="Timestamps of energy peaks for impact moments")
+    recommended_cut_points: Optional[List[float]] = Field(None, description="Best timestamps for video cuts")
 
 
 class SemanticAudioAnalysisTool:
@@ -113,7 +125,7 @@ class SemanticAudioAnalysisTool:
         """Perform comprehensive semantic analysis."""
         loop = asyncio.get_event_loop()
         
-        prompt = """Analyze this audio file comprehensively for video editing purposes.
+        prompt = """Analyze this audio file comprehensively for video editing purposes. Pay special attention to musical structure and transitions for synchronization.
 
 Please provide:
 
@@ -121,43 +133,74 @@ Please provide:
 
 2. **Summary**: Brief 2-3 sentence summary of the content
 
-3. **Segments**: List of notable segments with:
-   - start_time and end_time (in seconds)
-   - content: what is said or happens
-   - type: "speech", "music", "sound_effect", or "silence"
+3. **Segments**: List of ALL notable segments with precise timing:
+   - start_time and end_time (in seconds, be very precise)
+   - content: what is said or happens in this segment
+   - type: "speech", "music", "sound_effect", "silence", "intro", "verse", "chorus", "bridge", "outro", "drop", "buildup"
    - speaker: identified speaker if speech (null otherwise)
    - importance: 0-1 score for inclusion in final video
+   
+   For MUSIC segments, also include:
+   - musical_structure: "intro", "verse", "chorus", "bridge", "outro", "drop", "buildup", "break", etc.
+   - energy_transition: "building", "dropping", "steady", "peak", "valley"
+   - musical_elements: ["vocals", "drums", "bass", "melody", "harmony", "effects"] (active elements)
+   - tempo_change: "accelerating", "decelerating", "steady" (if tempo changes)
+   - sync_priority: 0-1 score for how important this moment is for video sync (1.0 = must sync)
 
 4. **Speakers**: List of identified speakers (empty if no speech)
 
-5. **Topics**: Main topics or themes discussed
+5. **Topics**: Main topics or themes (for speech) OR musical themes/moods (for music)
 
-6. **Emotional Tone**: Overall emotional tone (e.g., "upbeat", "serious", "nostalgic", "dramatic")
+6. **Emotional Tone**: Overall emotional tone (e.g., "upbeat", "melancholic", "energetic", "peaceful", "dramatic", "euphoric")
 
-7. **Key Moments**: Important moments for video synchronization:
-   - timestamp: when it occurs
-   - description: what happens
-   - sync_suggestion: how to sync with video (e.g., "cut to new scene", "emphasize with slow motion")
+7. **Key Moments**: Important moments for video synchronization with EXACT timestamps:
+   - timestamp: exact time in seconds when it occurs
+   - description: what happens (e.g., "beat drops", "chorus starts", "energy peak", "tempo change")
+   - sync_suggestion: specific video editing suggestion (e.g., "hard cut on beat", "start slow motion", "transition to new scene")
 
-8. **Sound Elements**: Non-speech sounds with timestamps:
+8. **Sound Elements**: Non-speech sounds with precise timestamps:
    - "laughter": [timestamps]
    - "applause": [timestamps]
    - "music": [start, end timestamps]
+   - "silence": [start, end timestamps]
    - etc.
+
+9. **Musical Structure Summary**: (for music files) Brief overview like "Intro (0-15s) → Verse 1 (15-45s) → Chorus (45-75s)..."
+
+10. **Energy Peaks**: (for music files) List of exact timestamps where energy/intensity peaks for impact moments
+
+11. **Recommended Cut Points**: (for music files) List of ideal timestamps for video cuts based on rhythm and structure
 
 Return as JSON matching this structure:
 {
     "transcript": "string or null",
     "summary": "string",
-    "segments": [...],
+    "segments": [
+        {
+            "start_time": 0.0,
+            "end_time": 15.5,
+            "content": "Instrumental intro with building energy",
+            "type": "intro",
+            "speaker": null,
+            "importance": 0.8,
+            "musical_structure": "intro",
+            "energy_transition": "building",
+            "musical_elements": ["drums", "bass", "effects"],
+            "tempo_change": "steady",
+            "sync_priority": 0.9
+        }
+    ],
     "speakers": [...],
     "topics": [...],
     "emotional_tone": "string",
     "key_moments": [...],
-    "sound_elements": {...}
+    "sound_elements": {...},
+    "musical_structure_summary": "string or null",
+    "energy_peaks": [15.2, 45.7, 76.3] or null,
+    "recommended_cut_points": [4.0, 8.0, 15.5, 30.0] or null
 }
 
-Focus on elements that would be useful for creating an engaging video."""
+Be extremely precise with timestamps - video editors need exact frame-accurate timing. Identify EVERY musical transition, beat drop, chorus entry, and energy shift."""
         
         try:
             # Generate analysis
@@ -182,14 +225,21 @@ Focus on elements that would be useful for creating an engaging video."""
             # Convert to SemanticAudioAnalysis
             segments = []
             for seg in result_data.get("segments", []):
-                segments.append(AudioSegment(
+                segment = AudioSegment(
                     start_time=seg["start_time"],
                     end_time=seg["end_time"],
                     content=seg["content"],
                     type=seg["type"],
                     speaker=seg.get("speaker"),
-                    importance=seg["importance"]
-                ))
+                    importance=seg["importance"],
+                    # Musical structure fields
+                    musical_structure=seg.get("musical_structure"),
+                    energy_transition=seg.get("energy_transition"),
+                    musical_elements=seg.get("musical_elements"),
+                    tempo_change=seg.get("tempo_change"),
+                    sync_priority=seg.get("sync_priority")
+                )
+                segments.append(segment)
             
             return SemanticAudioAnalysis(
                 transcript=result_data.get("transcript"),
@@ -199,7 +249,11 @@ Focus on elements that would be useful for creating an engaging video."""
                 topics=result_data.get("topics", []),
                 emotional_tone=result_data["emotional_tone"],
                 key_moments=result_data.get("key_moments", []),
-                sound_elements=result_data.get("sound_elements", {})
+                sound_elements=result_data.get("sound_elements", {}),
+                # Musical structure overview fields
+                musical_structure_summary=result_data.get("musical_structure_summary"),
+                energy_peaks=result_data.get("energy_peaks"),
+                recommended_cut_points=result_data.get("recommended_cut_points")
             )
             
         except Exception as e:
@@ -257,4 +311,4 @@ async def analyze_audio_semantics(file_path: str, storage: Optional[StorageInter
         }
 
 # Create the ADK tool
-semantic_audio_analysis_tool = FunctionTool(func=analyze_audio_semantics)
+semantic_audio_analysis_tool = FunctionTool(analyze_audio_semantics)

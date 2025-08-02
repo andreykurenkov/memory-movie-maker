@@ -305,14 +305,6 @@ async def parse_user_request(
 
 
 # Create ADK tools
-parse_refinements_tool = FunctionTool(
-    parse_refinements,
-    name="parse_refinements",
-    description="Parse evaluation feedback into edit commands"
-)
+parse_refinements_tool = FunctionTool(parse_refinements)
 
-parse_user_request_tool = FunctionTool(
-    parse_user_request,
-    name="parse_user_request",
-    description="Parse natural language requests into structured commands"
-)
+parse_user_request_tool = FunctionTool(parse_user_request)

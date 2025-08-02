@@ -31,7 +31,7 @@ class MemoryMovieMakerApp:
         with gr.Blocks(title="Memory Movie Maker", theme=gr.themes.Soft()) as app:
             gr.Markdown(
                 """
-                # <¬ Memory Movie Maker
+                # <ï¿½ Memory Movie Maker
                 
                 Transform your photos and videos into beautiful memory movies with AI-powered editing.
                 """
@@ -83,7 +83,7 @@ class MemoryMovieMakerApp:
                             )
                             
                             create_btn = gr.Button(
-                                "<¬ Create Memory Movie",
+                                "<ï¿½ Create Memory Movie",
                                 variant="primary",
                                 size="lg"
                             )
@@ -103,7 +103,7 @@ class MemoryMovieMakerApp:
                             
                             with gr.Row():
                                 download_btn = gr.Button(
-                                    "=¾ Download Video",
+                                    "=ï¿½ Download Video",
                                     visible=False
                                 )
                                 
@@ -180,7 +180,7 @@ class MemoryMovieMakerApp:
                 with gr.TabItem("Examples & Help"):
                     gr.Markdown(
                         """
-                        ## =Ú How to Use
+                        ## =ï¿½ How to Use
                         
                         ### 1. Upload Your Media
                         - Select multiple photos and/or videos
@@ -212,7 +212,7 @@ class MemoryMovieMakerApp:
                           - "Use crossfade transition at 0:30"
                           - "Remove the clip at 0:45"
                         
-                        ## <¯ Tips for Best Results
+                        ## <ï¿½ Tips for Best Results
                         
                         1. **Media Quality**: Use high-resolution photos/videos
                         2. **Variety**: Include diverse shots and angles
@@ -220,11 +220,11 @@ class MemoryMovieMakerApp:
                         4. **Clear Prompts**: Be specific about what you want
                         5. **Iterate**: Use refinement to perfect your video
                         
-                        ## ¡ Keyboard Shortcuts
+                        ## ï¿½ Keyboard Shortcuts
                         
                         - `Space`: Play/pause video
-                        - `/’`: Seek backward/forward
-                        - `‘/“`: Volume up/down
+                        - `ï¿½/ï¿½`: Seek backward/forward
+                        - `ï¿½/ï¿½`: Volume up/down
                         """
                     )
             
@@ -283,9 +283,9 @@ class MemoryMovieMakerApp:
                 # Create log
                 log_lines = [
                     " Video created successfully!",
-                    f"=ù Output: {Path(result['video_path']).name}",
-                    f"ñ Duration: {duration} seconds",
-                    f"<¨ Style: {style}"
+                    f"=ï¿½ Output: {Path(result['video_path']).name}",
+                    f"ï¿½ Duration: {duration} seconds",
+                    f"<ï¿½ Style: {style}"
                 ]
                 
                 if auto_refine:
@@ -301,12 +301,12 @@ class MemoryMovieMakerApp:
                         if eval_results.get('strengths'):
                             log_lines.append("\n Strengths:")
                             for strength in eval_results['strengths'][:3]:
-                                log_lines.append(f"  " {strength}")
+                                log_lines.append(f"  âœ“ {strength}")
                         
                         if eval_results.get('weaknesses'):
-                            log_lines.append("\n  Areas for improvement:")
+                            log_lines.append("\nï¿½ Areas for improvement:")
                             for weakness in eval_results['weaknesses'][:2]:
-                                log_lines.append(f"  " {weakness}")
+                                log_lines.append(f"  â€¢ {weakness}")
                 
                 return result['video_path'], "\n".join(log_lines)
             else:
@@ -355,8 +355,8 @@ class MemoryMovieMakerApp:
             eval_results = self.current_project_state.evaluation_results
             
             eval_text = [
-                f"=Ê Overall Score: {eval_results.get('overall_score', 'N/A')}/10",
-                f"=¡ Recommendation: {eval_results.get('recommendation', 'N/A').replace('_', ' ').title()}",
+                f"=ï¿½ Overall Score: {eval_results.get('overall_score', 'N/A')}/10",
+                f"=ï¿½ Recommendation: {eval_results.get('recommendation', 'N/A').replace('_', ' ').title()}",
                 ""
             ]
             
@@ -367,7 +367,7 @@ class MemoryMovieMakerApp:
                 eval_text.append("")
             
             if eval_results.get('weaknesses'):
-                eval_text.append("  Issues:")
+                eval_text.append("ï¿½ Issues:")
                 for weakness in eval_results['weaknesses']:
                     eval_text.append(f"  " {weakness}")
                 eval_text.append("")
@@ -376,7 +376,7 @@ class MemoryMovieMakerApp:
                 eval_text.append("=' Suggested Edits:")
                 for edit in eval_results['specific_edits'][:5]:
                     eval_text.append(f"  " [{edit['timestamp']}] {edit['issue']}")
-                    eval_text.append(f"    ’ {edit['suggestion']}")
+                    eval_text.append(f"    ï¿½ {edit['suggestion']}")
             
             return current_video_path, "\n".join(eval_text)
         else:
@@ -401,7 +401,7 @@ class MemoryMovieMakerApp:
                 
                 log = [
                     " Feedback applied successfully!",
-                    f"=ù New video: {Path(result['video_path']).name}",
+                    f"=ï¿½ New video: {Path(result['video_path']).name}",
                     "",
                     "Changes applied based on your feedback."
                 ]

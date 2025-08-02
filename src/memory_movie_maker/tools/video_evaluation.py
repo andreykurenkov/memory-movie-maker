@@ -255,8 +255,4 @@ async def evaluate_video(
 
 
 # Create ADK tool
-evaluate_video_tool = FunctionTool(
-    evaluate_video,
-    name="evaluate_video",
-    description="Evaluate rendered video quality and suggest improvements"
-)
+evaluate_video_tool = FunctionTool(evaluate_video)

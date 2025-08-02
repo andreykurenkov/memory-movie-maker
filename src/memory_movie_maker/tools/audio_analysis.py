@@ -236,4 +236,4 @@ async def analyze_audio_media(file_path: str, storage: Optional[StorageInterface
         }
 
 # Create the ADK tool
-audio_analysis_tool = FunctionTool(func=analyze_audio_media)
+audio_analysis_tool = FunctionTool(analyze_audio_media)

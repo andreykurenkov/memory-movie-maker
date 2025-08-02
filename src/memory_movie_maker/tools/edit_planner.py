@@ -47,7 +47,8 @@ class EditPlanner:
         music_profile: Optional[AudioAnalysisProfile],
         target_duration: int,
         user_prompt: str,
-        style_preferences: Dict[str, Any]
+        style_preferences: Dict[str, Any],
+        music_asset: Optional[MediaAsset] = None
     ) -> EditPlan:
         """Create an intelligent edit plan using Gemini.
         
@@ -117,10 +118,24 @@ class EditPlanner:
             
             if asset.audio_analysis:
                 info["audio_mood"] = asset.audio_analysis.vibe.mood
-                info["tempo"] = asset.audio_analysis.vibe.tempo_bpm
+                info["tempo"] = asset.audio_analysis.tempo_bpm
             
             if asset.semantic_audio_analysis:
                 info["audio_content"] = asset.semantic_audio_analysis.get("summary", "")
+                # Include musical segments if available
+                if asset.semantic_audio_analysis.get("segments"):
+                    info["audio_segments"] = [
+                        {
+                            "start": seg.get("start_time", 0),
+                            "end": seg.get("end_time", 0),
+                            "type": seg.get("type", ""),
+                            "musical_structure": seg.get("musical_structure"),
+                            "energy_transition": seg.get("energy_transition"),
+                            "sync_priority": seg.get("sync_priority", 0.5)
+                        }
+                        for seg in asset.semantic_audio_analysis.get("segments", [])
+                        if seg.get("type") in ["music", "intro", "verse", "chorus", "bridge", "outro", "drop", "buildup"]
+                    ]
                 
             media_info.append(info)
         
@@ -326,12 +341,14 @@ async def plan_edit(
         # Separate media types
         visual_media = []
         music_track = None
+        music_asset = None
         
         for asset in state.user_inputs.media:
             if asset.type in [MediaType.IMAGE, MediaType.VIDEO]:
                 visual_media.append(asset)
             elif asset.type == MediaType.AUDIO and asset.audio_analysis:
                 music_track = asset.audio_analysis
+                music_asset = asset  # Keep the full asset for semantic analysis
         
         if not visual_media:
             return {
@@ -377,10 +394,6 @@ async def plan_edit(
 
 # Create ADK tool
 if ADK_AVAILABLE:
-    plan_edit_tool = FunctionTool(
-        plan_edit,
-        name="plan_edit",
-        description="Plan video edit using AI to select and arrange clips intelligently"
-    )
+    plan_edit_tool = FunctionTool(plan_edit)
 else:
     plan_edit_tool = None

@@ -1,46 +1,48 @@
-"""Root agent orchestrator for the Memory Movie Maker system."""
+"""RootAgent - Central orchestrator for Memory Movie Maker."""
 
 import logging
-from typing import Dict, Any, Optional, List
-from pathlib import Path
 import asyncio
+from typing import Dict, Any, List, Optional
 import uuid
+from pathlib import Path
 
+try:
+    from google.adk.agents import Agent
+    ADK_AVAILABLE = True
+except ImportError:
+    ADK_AVAILABLE = False
+    
 from ..models.project_state import ProjectState, UserInputs, ProjectStatus
 from ..models.media_asset import MediaAsset, MediaType
-from ..storage.interface import StorageInterface
 from ..storage.filesystem import FilesystemStorage
-
-# Import all agents
-from .analysis_agent import AnalysisAgent
-from .composition_agent import CompositionAgent
-from .evaluation_agent import EvaluationAgent
-from .refinement_agent import RefinementAgent
-
+from ..agents.analysis_agent import AnalysisAgent
+from ..agents.composition_agent import CompositionAgent
+from ..agents.evaluation_agent import EvaluationAgent  
+from ..agents.refinement_agent import RefinementAgent
+from ..utils.simple_logger import log_start, log_update, log_complete
 
 logger = logging.getLogger(__name__)
 
 
 class RootAgent:
-    """Orchestrates the entire Memory Movie Maker workflow."""
+    """Central orchestrator that manages the entire workflow."""
     
-    def __init__(self, storage: Optional[StorageInterface] = None):
-        """Initialize root agent with all sub-agents.
+    def __init__(self, storage_path: str = "./data"):
+        """Initialize root agent with sub-agents."""
+        # Storage for saving project states
+        self.storage = FilesystemStorage(storage_path)
         
-        Args:
-            storage: Storage interface for file management
-        """
-        self.storage = storage or FilesystemStorage(base_path="./data")
-        
-        # Initialize all agents
-        self.analysis_agent = AnalysisAgent(storage=self.storage)
-        self.composition_agent = CompositionAgent(storage=self.storage)
+        # Initialize sub-agents
+        self.analysis_agent = AnalysisAgent()
+        self.composition_agent = CompositionAgent()
         self.evaluation_agent = EvaluationAgent()
         self.refinement_agent = RefinementAgent()
         
         # Configuration
         self.max_refinement_iterations = 3
         self.min_acceptable_score = 7.0
+        
+        logger.info("RootAgent initialized with all sub-agents")
     
     async def create_memory_movie(
         self,
@@ -51,47 +53,51 @@ class RootAgent:
         style: str = "auto",
         auto_refine: bool = True
     ) -> Dict[str, Any]:
-        """Create a complete memory movie from raw media files.
+        """Main entry point for creating a memory movie.
         
         Args:
             media_paths: List of paths to media files
             user_prompt: User's description of desired video
-            music_path: Optional path to music file
+            music_path: Optional path to background music
             target_duration: Target video duration in seconds
-            style: Video style (auto, smooth, dynamic, fast)
-            auto_refine: If True, automatically refine based on evaluation
+            style: Style preference (auto, smooth, dynamic, fast)
+            auto_refine: Whether to auto-refine using evaluation
             
         Returns:
-            Result dictionary with final video path and project state
+            Result dictionary with video path and metadata
         """
         try:
-            logger.info("Starting Memory Movie Maker workflow")
+            log_start(logger, "Creating memory movie")
             
-            # Phase 1: Initialize project state
+            # Phase 1: Initialize project
+            logger.info("Phase 1: Initializing project")
             project_state = await self._initialize_project(
                 media_paths, user_prompt, music_path, target_duration, style
             )
             
-            # Phase 2: Analysis
-            logger.info("Phase 2: Analyzing media files...")
+            # Save initial state
+            await self._save_project_state(project_state)
+            
+            # Phase 2: Analyze media
+            logger.info("Phase 2: Analyzing media")
             project_state = await self.analysis_agent.analyze_project(project_state)
             
-            # Phase 3: Composition
-            logger.info("Phase 3: Creating initial composition...")
+            # Phase 3: Create initial video
+            logger.info("Phase 3: Creating initial video")
             project_state = await self.composition_agent.create_memory_movie(
                 project_state=project_state,
-                target_duration=target_duration,
-                style=style,
-                preview_only=True
+                style=style
             )
             
             if not auto_refine:
-                # Return after first composition if auto-refine is disabled
+                # Return immediately without refinement
+                log_complete(logger, "Initial video created without refinement")
                 return {
                     "status": "success",
-                    "video_path": project_state.rendered_outputs[-1],
+                    "video_path": project_state.rendered_outputs[-1] if project_state.rendered_outputs else None,
                     "project_state": project_state,
-                    "message": "Initial video created. Auto-refinement disabled."
+                    "message": "Initial video created (no auto-refinement)",
+                    "refinement_iterations": 0
                 }
             
             # Phase 4: Self-correction loop
@@ -105,124 +111,37 @@ class RootAgent:
                 )
                 
                 if evaluation_result["status"] != "success":
-                    logger.warning("Evaluation failed, skipping refinement")
+                    logger.error(f"Evaluation failed: {evaluation_result.get('error')}")
                     break
                 
-                evaluation = evaluation_result["evaluation"]
+                # Update project state with evaluation
                 project_state = evaluation_result["updated_state"]
+                evaluation = evaluation_result["evaluation"]
                 
                 # Check if video is acceptable
                 score = evaluation.get("overall_score", 0)
                 recommendation = evaluation.get("recommendation", "")
-                
-                logger.info(f"Evaluation score: {score}/10, recommendation: {recommendation}")
                 
                 if score >= self.min_acceptable_score and recommendation == "accept":
                     logger.info("Video meets acceptance criteria!")
                     break
                 
                 if recommendation == "major_rework":
-                    logger.warning("Major rework recommended, recreating from scratch...")
-                    # Reset timeline and recreate
+                    logger.info("Major rework needed - recreating from scratch")
+                    # Clear timeline to force recreation
                     project_state.timeline = None
                     project_state = await self.composition_agent.create_memory_movie(
                         project_state=project_state,
-                        target_duration=target_duration,
-                        style=style,
-                        preview_only=True
+                        style=style
                     )
                 else:
-                    # Parse refinements
-                    refinement_result = await self.refinement_agent.process_evaluation_feedback(
-                        project_state=project_state,
-                        evaluation_results=evaluation
-                    )
+                    # Apply refinements
+                    logger.info("Applying refinements based on evaluation")
                     
-                    if refinement_result["status"] == "success" and refinement_result["edit_commands"]:
-                        # Apply edits
-                        logger.info(f"Applying edits: {refinement_result['summary']}")
-                        project_state = await self.composition_agent.apply_edit_commands(
-                            project_state=project_state,
-                            edit_commands=refinement_result["edit_commands"]
-                        )
-                        
-                        # Re-render with edits
-                        project_state = await self.composition_agent.create_memory_movie(
-                            project_state=project_state,
-                            target_duration=target_duration,
-                            style=style,
-                            preview_only=True
-                        )
-                
-                refinement_count += 1
-            
-            # Phase 5: Final render in full quality
-            logger.info("Phase 5: Creating final high-quality render...")
-            project_state = await self.composition_agent.create_memory_movie(
-                project_state=project_state,
-                target_duration=target_duration,
-                style=style,
-                preview_only=False
-            )
-            
-            # Save project state
-            await self._save_project_state(project_state)
-            
-            return {
-                "status": "success",
-                "video_path": project_state.rendered_outputs[-1],
-                "project_state": project_state,
-                "refinement_iterations": refinement_count,
-                "final_score": project_state.evaluation_results.get("overall_score", "N/A")
-            }
-            
-        except Exception as e:
-            logger.error(f"Memory movie creation failed: {e}")
-            return {
-                "status": "error",
-                "error": str(e)
-            }
-    
-    async def process_user_feedback(
-        self,
-        project_state: ProjectState,
-        user_feedback: str
-    ) -> Dict[str, Any]:
-        """Process user feedback and apply requested changes.
-        
-        Args:
-            project_state: Current project state
-            user_feedback: User's feedback or edit request
-            
-        Returns:
-            Result with updated video and project state
-        """
-        try:
-            logger.info("Processing user feedback...")
-            
-            # Parse user request
-            request_result = await self.refinement_agent.parse_user_edit_request(
-                user_request=user_feedback,
-                project_state=project_state
-            )
-            
-            if request_result["status"] != "success":
-                return request_result
-            
-            intent = request_result["intent"]
-            parameters = request_result["parameters"]
-            
-            if intent == "evaluate":
-                # Run evaluation
-                return await self.evaluation_agent.evaluate_memory_movie(project_state)
-            
-            elif intent == "edit":
-                # Parse into edit commands
-                if project_state.evaluation_results:
+                    # Get edit commands from evaluation feedback
                     refinement_result = await self.refinement_agent.process_evaluation_feedback(
-                        project_state=project_state,
-                        evaluation_results=project_state.evaluation_results,
-                        user_feedback=user_feedback
+                        evaluation_feedback=evaluation,
+                        project_state=project_state
                     )
                     
                     if refinement_result["status"] == "success":
@@ -235,34 +154,132 @@ class RootAgent:
                         # Re-render
                         project_state = await self.composition_agent.create_memory_movie(
                             project_state=project_state,
-                            target_duration=parameters.get("duration", project_state.user_inputs.target_duration),
-                            style=parameters.get("style", "auto"),
-                            preview_only=parameters.get("quality", "preview") == "preview"
+                            style=style,
+                            skip_composition=True  # Keep existing timeline
                         )
+                
+                refinement_count += 1
+            
+            # Phase 5: Finalize and save
+            logger.info("Phase 5: Finalizing project")
+            project_state.project_status.phase = "completed"
+            project_state.project_status.progress = 100
+            
+            # Save final state
+            await self._save_project_state(project_state)
+            
+            final_video_path = project_state.rendered_outputs[-1] if project_state.rendered_outputs else None
+            final_score = project_state.evaluation_results.get("overall_score", 0) if project_state.evaluation_results else 0
+            
+            log_complete(logger, f"Memory movie created: {final_video_path}")
+            
+            return {
+                "status": "success",
+                "video_path": final_video_path,
+                "project_state": project_state,
+                "refinement_iterations": refinement_count,
+                "final_score": final_score,
+                "message": f"Video created with {refinement_count} refinement iterations"
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to create memory movie: {e}")
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+    
+    async def process_user_feedback(
+        self,
+        project_state: ProjectState,
+        user_feedback: str
+    ) -> Dict[str, Any]:
+        """Process user feedback and apply changes.
+        
+        Args:
+            project_state: Current project state
+            user_feedback: User's feedback text
+            
+        Returns:
+            Result with updated video path
+        """
+        try:
+            log_start(logger, "Processing user feedback")
+            
+            # Parse user intent
+            intent_result = await self.refinement_agent.parse_user_edit_request(
+                user_feedback=user_feedback,
+                project_state=project_state
+            )
+            
+            if intent_result["status"] != "success":
+                return intent_result
+            
+            intent = intent_result["intent"]
+            
+            if intent == "evaluate":
+                # User wants evaluation
+                evaluation_result = await self.evaluation_agent.evaluate_memory_movie(
+                    project_state=project_state
+                )
+                return evaluation_result
+            
+            elif intent == "edit":
+                # Convert feedback to edit commands
+                refinement_result = await self.refinement_agent.process_evaluation_feedback(
+                    evaluation_feedback={"user_feedback": user_feedback},
+                    project_state=project_state
+                )
+                
+                if refinement_result["status"] == "success":
+                    # Apply edits
+                    project_state = await self.composition_agent.apply_edit_commands(
+                        project_state=project_state,
+                        edit_commands=refinement_result["edit_commands"]
+                    )
+                    
+                    # Re-render
+                    style = project_state.user_inputs.style_preferences.get("style", "auto")
+                    project_state = await self.composition_agent.create_memory_movie(
+                        project_state=project_state,
+                        style=style,
+                        skip_composition=True
+                    )
+                    
+                    # Save updated state
+                    await self._save_project_state(project_state)
+                    
+                    return {
+                        "status": "success",
+                        "video_path": project_state.rendered_outputs[-1],
+                        "project_state": project_state,
+                        "message": "Feedback applied successfully"
+                    }
+            
+            elif intent == "regenerate":
+                # Full regeneration requested
+                style = project_state.user_inputs.style_preferences.get("style", "auto")
+                project_state = await self.composition_agent.create_memory_movie(
+                    project_state=project_state,
+                    style=style
+                )
+                
+                await self._save_project_state(project_state)
                 
                 return {
                     "status": "success",
                     "video_path": project_state.rendered_outputs[-1],
-                    "project_state": project_state
+                    "project_state": project_state,
+                    "message": "Video regenerated"
                 }
             
-            elif intent == "create":
-                # Create new video with parameters
-                return await self.create_memory_movie(
-                    media_paths=[m.file_path for m in project_state.user_inputs.media],
-                    user_prompt=user_feedback,
-                    target_duration=parameters.get("duration", 60),
-                    style=parameters.get("style", "auto")
-                )
+            return {
+                "status": "error",
+                "error": f"Unknown intent: {intent}"
+            }
             
-            else:
-                return {
-                    "status": "error",
-                    "error": f"Unknown intent: {intent}"
-                }
-                
         except Exception as e:
-            logger.error(f"User feedback processing failed: {e}")
+            logger.error(f"Failed to process feedback: {e}")
             return {
                 "status": "error",
                 "error": str(e)
@@ -276,17 +293,19 @@ class RootAgent:
         target_duration: int,
         style: str
     ) -> ProjectState:
-        """Initialize project state with media files."""
+        """Initialize project state from user inputs."""
+        # Create media assets
         media_assets = []
         
-        # Process media files
+        # Add main media files
         for path in media_paths:
             media_type = self._detect_media_type(path)
             if media_type:
                 asset = MediaAsset(
                     id=str(uuid.uuid4()),
                     file_path=path,
-                    type=media_type
+                    type=media_type,
+                    metadata={}
                 )
                 media_assets.append(asset)
         
@@ -295,46 +314,51 @@ class RootAgent:
             music_asset = MediaAsset(
                 id=str(uuid.uuid4()),
                 file_path=music_path,
-                type=MediaType.AUDIO
+                type=MediaType.AUDIO,
+                metadata={"role": "background_music"}
             )
             media_assets.append(music_asset)
         
-        # Create project state
-        project_state = ProjectState(
-            user_inputs=UserInputs(
-                media=media_assets,
-                initial_prompt=user_prompt,
-                target_duration=target_duration,
-                style_preferences={"style": style}
-            ),
-            project_status=ProjectStatus(phase="analyzing")
+        # Create user inputs
+        user_inputs = UserInputs(
+            media=media_assets,
+            initial_prompt=user_prompt,
+            target_duration=target_duration,
+            style_preferences={"style": style}
         )
         
-        logger.info(f"Initialized project with {len(media_assets)} media files")
+        # Create project state
+        project_state = ProjectState(
+            project_id=str(uuid.uuid4()),
+            user_inputs=user_inputs,
+            project_status=ProjectStatus(
+                phase="analyzing",
+                progress=10,
+                current_task="Initializing project"
+            )
+        )
+        
         return project_state
     
     def _detect_media_type(self, file_path: str) -> Optional[MediaType]:
         """Detect media type from file extension."""
         ext = Path(file_path).suffix.lower()
         
-        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
+        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
             return MediaType.IMAGE
-        elif ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv']:
+        elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
             return MediaType.VIDEO
-        elif ext in ['.mp3', '.wav', '.aac', '.flac', '.ogg', '.m4a']:
+        elif ext in ['.mp3', '.wav', '.aac', '.m4a', '.flac']:
             return MediaType.AUDIO
-        else:
-            logger.warning(f"Unknown file type: {ext}")
-            return None
+        
+        return None
     
     async def _save_project_state(self, project_state: ProjectState):
         """Save project state to storage."""
-        try:
-            project_id = project_state.project_id or str(uuid.uuid4())
-            await self.storage.save_project(project_id, project_state.model_dump())
-            logger.info(f"Project state saved: {project_id}")
-        except Exception as e:
-            logger.error(f"Failed to save project state: {e}")
+        await self.storage.save_project(
+            project_state.project_id,
+            project_state.model_dump()
+        )
 
 
 # Standalone function for testing
@@ -368,22 +392,22 @@ async def test_root_agent():
     )
     
     if result["status"] == "success":
-        print(f"\n Memory movie created successfully!")
+        print(f"\n✅ Memory movie created successfully!")
         print(f"Video path: {result['video_path']}")
         print(f"Refinement iterations: {result['refinement_iterations']}")
         print(f"Final score: {result['final_score']}")
         
         # Test user feedback
-        print("\n=� Testing user feedback...")
+        print("\n==> Testing user feedback...")
         feedback_result = await root_agent.process_user_feedback(
             project_state=result["project_state"],
             user_feedback="Make it 15 seconds long with smoother transitions"
         )
         
         if feedback_result["status"] == "success":
-            print(f" Feedback applied! New video: {feedback_result['video_path']}")
+            print(f"✅ Feedback applied! New video: {feedback_result['video_path']}")
     else:
-        print(f"\nL Failed: {result['error']}")
+        print(f"\n❌ Failed: {result['error']}")
 
 
 if __name__ == "__main__":

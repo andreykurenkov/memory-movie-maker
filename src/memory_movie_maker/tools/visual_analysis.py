@@ -441,6 +441,6 @@ async def analyze_visual_media(file_path: str, storage: Optional[StorageInterfac
 
 # Create the ADK tool
 if ADK_AVAILABLE:
-    visual_analysis_tool = FunctionTool(func=analyze_visual_media)
+    visual_analysis_tool = FunctionTool(analyze_visual_media)
 else:
     visual_analysis_tool = None
