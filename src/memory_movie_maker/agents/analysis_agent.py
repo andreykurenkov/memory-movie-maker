@@ -1,11 +1,11 @@
 """Analysis agent for processing media files."""
 
-import logging
-from typing import Dict, Any, List, Optional
-from pathlib import Path
 import asyncio
-import tempfile
+import logging
 import os
+import tempfile
+from pathlib import Path
+from typing import Dict, Any, List, Optional
 
 from google.adk.agents import Agent
 from google.adk.runners import InMemoryRunner
@@ -17,9 +17,13 @@ from ..models.project_state import ProjectState
 from ..models.media_asset import MediaAsset, MediaType
 from ..storage.interface import StorageInterface
 from ..storage.filesystem import FilesystemStorage
+from ..utils.simple_logger import log_start, log_update, log_complete
 
 
 logger = logging.getLogger(__name__)
+
+# Module-level storage for the agent
+_agent_storage: Optional[StorageInterface] = None
 
 
 class AnalysisAgent(Agent):
@@ -31,6 +35,9 @@ class AnalysisAgent(Agent):
         Args:
             storage: Storage interface for accessing files
         """
+        global _agent_storage
+        _agent_storage = storage or FilesystemStorage(base_path="./data")
+        
         super().__init__(
             name="AnalysisAgent",
             model="gemini-2.0-flash",
@@ -46,7 +53,11 @@ class AnalysisAgent(Agent):
             Be thorough but efficient. Cache results when possible.""",
             tools=[visual_analysis_tool, audio_analysis_tool, semantic_audio_analysis_tool]
         )
-        self.storage = storage or FilesystemStorage()
+    
+    @property
+    def storage(self) -> StorageInterface:
+        """Get the storage interface."""
+        return _agent_storage
     
     async def analyze_project(self, project_state: ProjectState) -> ProjectState:
         """Analyze all media files in the project.
@@ -60,7 +71,7 @@ class AnalysisAgent(Agent):
         # Get all media files
         media_files = project_state.user_inputs.media
         
-        logger.info(f"Analyzing {len(media_files)} media files")
+        log_start(logger, f"Analyzing {len(media_files)} media files")
         
         # Create batches for concurrent processing
         visual_tasks = []
@@ -69,7 +80,7 @@ class AnalysisAgent(Agent):
         for media_asset in media_files:
             # Skip if already analyzed and caching is enabled
             if self._is_fully_analyzed(media_asset) and project_state.analysis_cache_enabled:
-                logger.info(f"Skipping {media_asset.file_path} - already analyzed")
+                log_update(logger, f"Skipping {Path(media_asset.file_path).name} - already analyzed")
                 continue
             
             # Determine file type and create appropriate tasks
@@ -91,20 +102,27 @@ class AnalysisAgent(Agent):
         
         # Process all analyses concurrently
         if visual_tasks or audio_tasks:
-            logger.info(f"Running {len(visual_tasks)} visual and {len(audio_tasks)} audio analyses")
+            log_update(logger, f"Running {len(visual_tasks)} visual and {len(audio_tasks)} audio analyses concurrently...")
             
             all_tasks = visual_tasks + audio_tasks
             results = await asyncio.gather(*all_tasks, return_exceptions=True)
             
             # Log any errors
+            error_count = 0
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
+                    error_count += 1
                     logger.error(f"Analysis task {i} failed: {result}")
+            
+            if error_count == 0:
+                log_update(logger, f"All {len(all_tasks)} analysis tasks completed successfully")
+            else:
+                logger.warning(f"{error_count} out of {len(all_tasks)} tasks failed")
         
         # Update project phase
         if project_state.project_status.phase == "analyzing":
             project_state.project_status.phase = "composing"
-            logger.info("Analysis complete, moving to composing phase")
+            log_complete(logger, "Analysis phase complete, ready for composition")
         
         return project_state
     
@@ -126,7 +144,7 @@ class AnalysisAgent(Agent):
     async def _analyze_visual(self, media_asset: MediaAsset) -> MediaAsset:
         """Analyze visual content of an image or video."""
         try:
-            logger.info(f"Analyzing visual content: {media_asset.file_path}")
+            # No need to log here as visual_analysis tool will log
             
             # Call the visual analysis tool
             from ..tools.visual_analysis import analyze_visual_media
@@ -135,19 +153,18 @@ class AnalysisAgent(Agent):
             if result["status"] == "success":
                 # Update media asset with analysis
                 media_asset.gemini_analysis = result["analysis"]
-                logger.info(f"Visual analysis complete for {media_asset.file_path}")
             else:
-                logger.error(f"Visual analysis failed: {result.get('error')}")
+                logger.error(f"Visual analysis failed for {Path(media_asset.file_path).name}: {result.get('error')}")
             
         except Exception as e:
-            logger.error(f"Failed to analyze visual content {media_asset.file_path}: {e}")
+            logger.error(f"Failed to analyze visual content {Path(media_asset.file_path).name}: {e}")
         
         return media_asset
     
     async def _analyze_audio_technical(self, media_asset: MediaAsset) -> MediaAsset:
         """Analyze technical audio features."""
         try:
-            logger.info(f"Analyzing audio features: {media_asset.file_path}")
+            log_update(logger, f"Analyzing audio features: {Path(media_asset.file_path).name}")
             
             # Call the audio analysis tool
             from ..tools.audio_analysis import analyze_audio_media
@@ -156,19 +173,19 @@ class AnalysisAgent(Agent):
             if result["status"] == "success":
                 # Update media asset with analysis
                 media_asset.audio_analysis = result["analysis"]
-                logger.info(f"Audio analysis complete for {media_asset.file_path}")
+                log_update(logger, f"Audio analysis complete: {result['analysis']['tempo_bpm']:.0f} BPM, {len(result['analysis']['beat_timestamps'])} beats")
             else:
                 logger.error(f"Audio analysis failed: {result.get('error')}")
             
         except Exception as e:
-            logger.error(f"Failed to analyze audio {media_asset.file_path}: {e}")
+            logger.error(f"Failed to analyze audio {Path(media_asset.file_path).name}: {e}")
         
         return media_asset
     
     async def _analyze_audio_semantic(self, media_asset: MediaAsset) -> MediaAsset:
         """Analyze semantic audio content."""
         try:
-            logger.info(f"Analyzing audio semantics: {media_asset.file_path}")
+            log_update(logger, f"Analyzing audio semantics: {Path(media_asset.file_path).name}")
             
             # Call the semantic audio analysis tool
             from ..tools.semantic_audio_analysis import analyze_audio_semantics
@@ -177,12 +194,13 @@ class AnalysisAgent(Agent):
             if result["status"] == "success":
                 # Update media asset with analysis
                 media_asset.semantic_audio_analysis = result["analysis"]
-                logger.info(f"Semantic audio analysis complete for {media_asset.file_path}")
+                if result['analysis'].get('summary'):
+                    log_update(logger, f"Semantic analysis complete: {result['analysis']['summary'][:50]}...")
             else:
                 logger.error(f"Semantic audio analysis failed: {result.get('error')}")
             
         except Exception as e:
-            logger.error(f"Failed to analyze audio semantics {media_asset.file_path}: {e}")
+            logger.error(f"Failed to analyze audio semantics {Path(media_asset.file_path).name}: {e}")
         
         return media_asset
     
@@ -190,7 +208,7 @@ class AnalysisAgent(Agent):
         """Extract and analyze audio from video file."""
         audio_path = None
         try:
-            logger.info(f"Extracting audio from video: {media_asset.file_path}")
+            log_update(logger, f"Extracting audio from video: {Path(media_asset.file_path).name}")
             
             # Extract audio track
             audio_path = await self._extract_audio_from_video(media_asset.file_path)
@@ -207,7 +225,7 @@ class AnalysisAgent(Agent):
                     await self._analyze_audio_semantic(media_asset)
             
         except Exception as e:
-            logger.error(f"Failed to extract/analyze video audio {media_asset.file_path}: {e}")
+            logger.error(f"Failed to extract/analyze video audio {Path(media_asset.file_path).name}: {e}")
         finally:
             # Clean up temporary audio file
             if audio_path and os.path.exists(audio_path):
@@ -231,12 +249,12 @@ class AnalysisAgent(Agent):
                 video.close()
                 return audio_path
             else:
-                logger.warning(f"Video has no audio track: {video_path}")
+                logger.warning(f"Video has no audio track: {Path(video_path).name}")
                 video.close()
                 return None
             
         except Exception as e:
-            logger.error(f"Failed to extract audio from {video_path}: {e}")
+            logger.error(f"Failed to extract audio from {Path(video_path).name}: {e}")
             return None
 
 

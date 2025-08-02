@@ -22,6 +22,12 @@ try:
 except ImportError:
     GENAI_AVAILABLE = False
 
+try:
+    from google.adk.tools import FunctionTool
+    ADK_AVAILABLE = True
+except ImportError:
+    ADK_AVAILABLE = False
+
 from PIL import Image as PILImage
 import cv2
 import numpy as np
@@ -29,6 +35,7 @@ import numpy as np
 from ..config import settings
 from ..models.media_asset import GeminiAnalysis
 from ..storage.interface import StorageInterface
+from ..utils.simple_logger import log_start, log_update, log_complete
 
 
 logger = logging.getLogger(__name__)
@@ -61,14 +68,14 @@ class VisualAnalysisTool:
             )
             self._model = GenerativeModel(settings.get_gemini_model_name())
             self._api_type = "vertex"
-            logger.info("Initialized Gemini via Vertex AI")
+            log_complete(logger, f"Initialized Gemini via Vertex AI (project: {settings.google_cloud_project})")
         
         elif settings.gemini_api_key and GENAI_AVAILABLE:
             # Use direct Gemini API with new SDK
             self._client = genai.Client(api_key=settings.gemini_api_key)
             self._model_name = settings.get_gemini_model_name()
             self._api_type = "genai"
-            logger.info("Initialized Gemini via direct API (new SDK)")
+            log_complete(logger, f"Initialized Gemini via direct API using model: {self._model_name}")
         
         else:
             raise ValueError(
@@ -86,18 +93,24 @@ class VisualAnalysisTool:
             GeminiAnalysis object with structured analysis results
         """
         try:
+            log_start(logger, f"Analyzing image: {Path(image_path).name}")
+            
             # Load image data
+            log_update(logger, "Loading image data...")
             image_data = await self._load_image(image_path)
             
             # Create the analysis prompt
             prompt = self._create_image_analysis_prompt()
             
             # Call Gemini API
+            log_update(logger, "Sending to Gemini API...")
             response = await self._call_gemini(prompt, image_data, image_path)
             
             # Parse response into structured format
+            log_update(logger, "Parsing analysis results...")
             analysis = self._parse_gemini_response(response)
             
+            log_complete(logger, f"Image analysis complete - {analysis.description[:50]}...")
             return analysis
             
         except Exception as e:
@@ -114,18 +127,28 @@ class VisualAnalysisTool:
             GeminiAnalysis object with video analysis including notable segments
         """
         try:
+            log_start(logger, f"Analyzing video: {Path(video_path).name}")
+            
             # Get video duration for the prompt
+            log_update(logger, "Getting video metadata...")
             duration = await self._get_video_duration(video_path)
+            log_update(logger, f"Video duration: {duration:.1f} seconds")
             
             # Create the analysis prompt
             prompt = self._create_video_analysis_prompt(duration)
             
             # Call Gemini API with the video
+            log_update(logger, "Uploading video to Gemini API...")
             response = await self._call_gemini_video(prompt, video_path)
             
             # Parse response
+            log_update(logger, "Parsing video analysis results...")
             analysis = self._parse_gemini_response(response)
             
+            if analysis.notable_segments:
+                log_update(logger, f"Found {len(analysis.notable_segments)} notable segments")
+            
+            log_complete(logger, f"Video analysis complete - {analysis.description[:50]}...")
             return analysis
             
         except Exception as e:
@@ -211,6 +234,7 @@ Identify 2-5 notable segments that would be good for a highlight reel. Focus on 
             else:
                 # New Gemini SDK approach
                 # Upload the image file
+                log_update(logger, "Uploading image file...")
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self._client.files.upload(file=image_path)
@@ -271,12 +295,15 @@ Identify 2-5 notable segments that would be good for a highlight reel. Focus on 
             else:
                 # New Gemini SDK approach
                 # Upload the video file
+                video_size_mb = Path(video_path).stat().st_size / (1024 * 1024)
+                log_update(logger, f"Uploading video file ({video_size_mb:.1f} MB)...")
                 video_file = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self._client.files.upload(file=video_path)
                 )
                 
                 # Wait for file to be processed
+                log_update(logger, "Processing video file...")
                 while video_file.state.name == "PROCESSING":
                     await asyncio.sleep(1)
                     video_file = await asyncio.get_event_loop().run_in_executor(
@@ -288,6 +315,7 @@ Identify 2-5 notable segments that would be good for a highlight reel. Focus on 
                     raise ValueError(f"Video processing failed: {video_file.state.name}")
                 
                 # Generate content
+                log_update(logger, "Analyzing video content...")
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self._client.models.generate_content(
@@ -297,6 +325,7 @@ Identify 2-5 notable segments that would be good for a highlight reel. Focus on 
                 )
                 
                 # Clean up uploaded file
+                log_update(logger, "Cleaning up temporary files...")
                 await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self._client.files.delete(name=video_file.name)
@@ -361,8 +390,6 @@ Identify 2-5 notable segments that would be good for a highlight reel. Focus on 
 
 
 # ADK Tool wrapper
-from google.adk.tools import FunctionTool
-
 async def analyze_visual_media(file_path: str, storage: Optional[StorageInterface] = None) -> Dict[str, Any]:
     """Analyze image or video file using Gemini vision capabilities.
     
@@ -413,4 +440,7 @@ async def analyze_visual_media(file_path: str, storage: Optional[StorageInterfac
 
 
 # Create the ADK tool
-visual_analysis_tool = FunctionTool(func=analyze_visual_media)
+if ADK_AVAILABLE:
+    visual_analysis_tool = FunctionTool(func=analyze_visual_media)
+else:
+    visual_analysis_tool = None

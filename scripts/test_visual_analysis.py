@@ -10,8 +10,12 @@ from pprint import pprint
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from memory_movie_maker.utils.logging_config import configure_logging
 from memory_movie_maker.tools.visual_analysis import VisualAnalysisTool
 from memory_movie_maker.config import settings
+
+# Configure logging to suppress external libraries
+configure_logging(level="INFO", suppress_external=True)
 
 
 async def test_video_analysis():

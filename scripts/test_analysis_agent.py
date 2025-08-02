@@ -9,12 +9,13 @@ import logging
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from memory_movie_maker.utils.simple_logger import setup_logging
 from memory_movie_maker.agents.analysis_agent import AnalysisAgent
 from memory_movie_maker.models.project_state import ProjectState, UserInputs, ProjectStatus
 from memory_movie_maker.models.media_asset import MediaAsset, MediaType
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# Set up clean logging
+setup_logging()
 
 
 async def test_analysis_agent():
