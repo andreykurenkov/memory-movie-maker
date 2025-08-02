@@ -18,6 +18,21 @@ class MediaType(str, Enum):
     AUDIO = "audio"
 
 
+class VideoSegment(BaseModel):
+    """Notable segment or event within a video."""
+    start_time: float = Field(..., ge=0, description="Start time in seconds")
+    end_time: float = Field(..., ge=0, description="End time in seconds")
+    description: str = Field(..., description="What happens in this segment")
+    importance: float = Field(..., ge=0, le=1, description="Importance score for timeline inclusion")
+    tags: List[str] = Field(default_factory=list, description="Event tags (action, emotion, transition)")
+    
+    @validator('end_time')
+    def validate_times(cls, v, values):
+        if 'start_time' in values and v <= values['start_time']:
+            raise ValueError('End time must be after start time')
+        return v
+
+
 class GeminiAnalysis(BaseModel):
     """Structured output from Gemini visual analysis."""
     description: str = Field(..., description="Brief description of content")
@@ -25,15 +40,11 @@ class GeminiAnalysis(BaseModel):
     quality_issues: List[str] = Field(default_factory=list, description="Detected quality problems")
     main_subjects: List[str] = Field(default_factory=list, description="Primary subjects in frame")
     tags: List[str] = Field(default_factory=list, description="Content tags for categorization")
-    best_moment_timestamp: Optional[float] = Field(None, description="Best moment in video (seconds)")
-    motion_level: Optional[str] = Field(None, description="Motion intensity: static/slow/medium/fast")
-    suggested_use: Optional[str] = Field(None, description="Suggested timeline placement")
     
-    @validator('motion_level')
-    def validate_motion_level(cls, v):
-        if v is not None and v not in ['static', 'slow', 'medium', 'fast']:
-            raise ValueError('motion_level must be one of: static, slow, medium, fast')
-        return v
+    # Video-specific fields
+    notable_segments: List[VideoSegment] = Field(default_factory=list, description="Notable video segments")
+    overall_motion: Optional[str] = Field(None, description="Overall motion characterization")
+    scene_changes: List[float] = Field(default_factory=list, description="Timestamps of major scene changes")
 
 
 class AudioVibe(BaseModel):
@@ -47,7 +58,7 @@ class AudioVibe(BaseModel):
 
 
 class AudioAnalysisProfile(BaseModel):
-    """Audio track analysis results from Essentia."""
+    """Audio track analysis results from Librosa."""
     file_path: str = Field(..., description="Path to audio file")
     beat_timestamps: List[float] = Field(..., description="Detected beat positions in seconds")
     tempo_bpm: float = Field(..., gt=0, description="Tempo in beats per minute")
@@ -76,6 +87,7 @@ class MediaAsset(BaseModel):
     # Analysis results
     gemini_analysis: Optional[GeminiAnalysis] = Field(None, description="Visual analysis results")
     audio_analysis: Optional[AudioAnalysisProfile] = Field(None, description="Audio analysis results")
+    semantic_audio_analysis: Optional[Dict[str, Any]] = Field(None, description="Semantic audio analysis results")
     
     # User preferences
     required: bool = Field(False, description="Must be included in final video")

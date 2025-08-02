@@ -411,8 +411,7 @@ async def visual_analysis_tool(
 
 #### Audio Analysis Tool
 ```python
-import essentia
-import essentia.standard as es
+import librosa
 import numpy as np
 from typing import Dict, List, Any
 
@@ -422,7 +421,7 @@ def audio_analysis_tool(
     detailed: bool = True
 ) -> Dict[str, Any]:
     """
-    Analyzes audio using Essentia library.
+    Analyzes audio using Librosa library.
     
     Args:
         file_path: Path to audio file
@@ -433,54 +432,53 @@ def audio_analysis_tool(
     """
     try:
         # Load audio
-        loader = es.EasyLoader(filename=file_path)
-        audio = loader()
+        y, sr = librosa.load(file_path)
         
-        # Rhythm analysis
-        rhythm_extractor = es.RhythmExtractor2013()
-        bpm, beats, beats_confidence, _, _ = rhythm_extractor(audio)
+        # Beat tracking
+        tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
+        beat_times = librosa.frames_to_time(beats, sr=sr)
         
-        # Energy analysis
-        frame_size = 2048
-        hop_size = 1024
-        energy = []
-        
-        for frame in es.FrameGenerator(audio, 
-                                       frameSize=frame_size, 
-                                       hopSize=hop_size):
-            energy.append(es.Energy()(frame))
+        # Energy analysis using RMS
+        hop_length = 512
+        rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
         
         # Normalize energy curve
-        energy = np.array(energy)
-        energy = (energy - energy.min()) / (energy.max() - energy.min())
+        energy = (rms - rms.min()) / (rms.max() - rms.min() + 1e-6)
         
         # High-level descriptors (if detailed)
         vibe = {}
         if detailed:
-            # Danceability
-            danceability = es.Danceability()(audio)
+            # Spectral features for mood analysis
+            spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
+            spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)[0]
+            zero_crossings = librosa.feature.zero_crossing_rate(y)[0]
             
-            # Mood detection
-            mood_model = es.TensorflowPredict(
-                graphFilename='mood_model.pb',
-                inputs=['input'],
-                outputs=['output']
-            )
-            mood_predictions = mood_model(audio)
+            # Simple energy-based danceability estimate
+            danceability = float(np.mean(energy) * (tempo / 140.0))  # Normalize around 140 BPM
+            danceability = min(1.0, max(0.0, danceability))
+            
+            # Simple mood estimation based on spectral features
+            brightness = np.mean(spectral_centroids) / (sr / 2)
+            if brightness > 0.6:
+                mood = "happy"
+            elif brightness > 0.4:
+                mood = "neutral"
+            else:
+                mood = "calm"
             
             vibe = {
-                "danceability": float(danceability),
+                "danceability": danceability,
                 "energy": float(np.mean(energy)),
-                "mood": _interpret_mood(mood_predictions)
+                "mood": mood
             }
         
         return {
             "status": "success",
             "result": {
-                "beat_timestamps": beats.tolist(),
-                "tempo_bpm": float(bpm),
+                "beat_timestamps": beat_times.tolist(),
+                "tempo_bpm": float(tempo),
                 "energy_curve": energy.tolist(),
-                "duration": len(audio) / 44100.0,
+                "duration": len(y) / sr,
                 "vibe": vibe
             }
         }

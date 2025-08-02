@@ -16,6 +16,7 @@ from .project_state import (
 from .media_asset import (
     MediaAsset,
     MediaType,
+    VideoSegment,
     GeminiAnalysis,
     AudioAnalysisProfile,
     AudioVibe,
@@ -43,6 +44,7 @@ __all__ = [
     # Media Assets
     "MediaAsset",
     "MediaType",
+    "VideoSegment",
     "GeminiAnalysis",
     "AudioAnalysisProfile",
     "AudioVibe",

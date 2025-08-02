@@ -25,6 +25,23 @@ Memory Movie Maker leverages Google's Agent Development Kit (ADK) and advanced A
 
 ### Installation
 
+#### Automated Setup (Recommended)
+
+```bash
+git clone https://github.com/yourusername/memory-movie-maker.git
+cd memory-movie-maker
+python scripts/setup_dev_env.py
+```
+
+This will:
+- Check Python version and FFmpeg
+- Create virtual environment
+- Install all dependencies
+- Set up configuration files
+- Create required directories
+
+#### Manual Setup
+
 1. Clone the repository:
 ```bash
 git clone https://github.com/yourusername/memory-movie-maker.git
@@ -39,7 +56,9 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 3. Install dependencies:
 ```bash
-pip install -e .
+pip install -e ".[dev]"  # For development
+# or
+pip install -e .         # For usage only
 ```
 
 4. Set up environment variables:
@@ -116,6 +135,10 @@ Memory Movie Maker uses a multi-agent architecture:
 3. **Run a single agent**: See `examples/agents/sample_analysis_agent.py`
 4. **Debug with logging**: Set `LOG_LEVEL=DEBUG` in `.env`
 
+### 🚀 Next Implementation Step
+
+**Storage Layer Implementation** - See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for detailed guide on implementing the storage abstraction layer.
+
 ### Project Structure
 
 See [docs/TDD.md](docs/TDD.md) for detailed project structure.
@@ -156,6 +179,6 @@ MIT License - see LICENSE file for details
 Built with:
 - [Google ADK](https://google.github.io/adk-docs/) - Agent Development Kit
 - [Gemini API](https://ai.google.dev/) - Visual and language understanding
-- [Essentia](https://essentia.upf.edu/) - Audio analysis
+- [Librosa](https://librosa.org/) - Audio analysis
 - [MoviePy](https://zulko.github.io/moviepy/) - Video editing
 - [Gradio](https://gradio.app/) - Web interface

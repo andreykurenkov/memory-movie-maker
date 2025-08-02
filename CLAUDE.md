@@ -6,8 +6,8 @@ Memory Movie Maker is an intelligent, conversational video editing tool that tra
 
 ### Key Technologies
 - **Google ADK**: Multi-agent orchestration framework
-- **Gemini API**: Visual analysis and natural language processing
-- **Essentia**: Audio analysis and beat detection
+- **Gemini API**: Visual analysis and natural language processing (using new google-genai SDK v1.28.0)
+- **Librosa**: Audio analysis and beat detection
 - **MoviePy/FFmpeg**: Video rendering
 - **Gradio**: Web interface
 
@@ -62,37 +62,51 @@ sudo apt install ffmpeg
 ffmpeg -version
 ```
 
-### Installing Essentia
+### Installing Librosa
 
-Essentia has system dependencies that need special attention:
+Librosa is much easier to install than Essentia:
 
-**macOS:**
+**All platforms:**
 ```bash
-# Install dependencies
-brew install libsamplerate libyaml fftw
-# Install Essentia
-pip install essentia
+pip install librosa
 ```
 
-**Ubuntu/Debian:**
+**Optional dependencies for better performance:**
 ```bash
-# Install dependencies
-sudo apt-get install libyaml-dev libfftw3-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev
-# Install Essentia
-pip install essentia
-```
+# For faster audio loading
+pip install soundfile
 
-**Common Issues:**
-- If pip install fails, try: `pip install essentia --no-binary :all:`
-- For M1/M2 Macs, you may need to build from source
-- Windows users should use WSL2 for best compatibility
+# For MP3 support
+pip install audioread
+```
 
 **Verify Installation:**
 ```python
-import essentia
-import essentia.standard as es
-print(f"Essentia version: {essentia.__version__}")
+import librosa
+print(f"Librosa version: {librosa.__version__}")
+
+# Test loading audio
+y, sr = librosa.load(librosa.example('trumpet'))
+print(f"Sample rate: {sr}, Duration: {len(y)/sr:.2f}s")
 ```
+
+### Audio Analysis Architecture
+
+The system uses **two complementary audio analysis approaches**:
+
+1. **Technical Analysis (Librosa)**
+   - Beat detection and tempo extraction
+   - Energy curves for dynamic video cuts
+   - Musical characteristics (danceability, valence)
+   - Perfect for rhythm-synced editing
+
+2. **Semantic Analysis (Gemini)**
+   - Speech transcription and speaker identification
+   - Emotional tone and topic extraction
+   - Audio segmentation (speech, music, effects)
+   - Content-aware video composition
+
+Both tools work together to enable intelligent video editing that syncs with both the rhythm AND meaning of audio content.
 
 ### Setting Up API Access
 
@@ -105,10 +119,32 @@ print(f"Essentia version: {essentia.__version__}")
    gcloud services enable aiplatform.googleapis.com
    ```
 
-2. **Option B: Direct Gemini API**
+2. **Option B: Direct Gemini API (Recommended)**
    - Visit https://makersuite.google.com/app/apikey
    - Create new API key
    - Add to .env: `GEMINI_API_KEY=your-key-here`
+
+#### Important: New Google GenAI SDK
+As of 2025, we use the new `google-genai` SDK (v1.28.0) instead of the deprecated `google-generativeai` package. The new SDK provides:
+- Better performance and reliability
+- Unified API across different Google AI services
+- Improved file handling for large media uploads
+- Native async support
+
+Example usage:
+```python
+from google import genai
+
+# Initialize client
+client = genai.Client(api_key=settings.gemini_api_key)
+
+# Upload and analyze media
+file = client.files.upload(file="video.mp4")
+response = client.models.generate_content(
+    model="gemini-2.0-flash",
+    contents=[file, "Analyze this video"]
+)
+```
 
 ### Your First Agent Implementation
 
@@ -410,7 +446,7 @@ logger.error("Analysis failed", exc_info=True)
 ### Documentation
 - [Google ADK Docs](https://google.github.io/adk-docs/)
 - [Gemini API Reference](https://ai.google.dev/gemini-api/docs)
-- [Essentia Documentation](https://essentia.upf.edu/)
+- [Librosa Documentation](https://librosa.org/doc/latest/)
 - [MoviePy Guide](https://zulko.github.io/moviepy/)
 
 ### Support
