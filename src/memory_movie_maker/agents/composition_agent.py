@@ -7,10 +7,12 @@ from pathlib import Path
 from google.adk.agents import Agent
 
 from ..tools.composition import compose_timeline_tool
+from ..tools.edit_planner import plan_edit_tool
 from ..tools.video_renderer import render_video_tool
 from ..models.project_state import ProjectState
 from ..storage.interface import StorageInterface
 from ..storage.filesystem import FilesystemStorage
+from ..utils.simple_logger import log_start, log_update, log_complete
 
 
 logger = logging.getLogger(__name__)
@@ -34,27 +36,37 @@ class CompositionAgent(Agent):
         super().__init__(
             name="CompositionAgent",
             model="gemini-2.0-flash",
-            description="Creates video timelines and renders final videos",
-            instruction="""You are an expert video editor. Your responsibilities:
-            1. Create compelling video timelines from analyzed media
-            2. Sync video cuts to music beats when available
-            3. Apply appropriate transitions and effects
-            4. Render high-quality videos
-            5. Create preview versions for quick feedback
+            description="Creates intelligent video edits using AI planning and renders final videos",
+            instruction="""You are an award-winning video editor using AI to create compelling memory movies.
+
+            YOUR WORKFLOW:
+            1. First, use plan_edit to create an intelligent edit plan with Gemini
+            2. Then, use compose_timeline to execute the plan into a timeline
+            3. Finally, use render_video to create the output video
             
-            Guidelines:
-            - Match video energy to music dynamics
-            - Group similar content together
-            - Use smooth transitions by default
-            - Keep clips between 1-5 seconds
-            - Prioritize high-quality media
+            KEY RESPONSIBILITIES:
+            - Create emotionally resonant videos that tell a story
+            - Select clips that capture the essence of the memory
+            - Sync key moments to music beats and energy
+            - Apply smooth, professional transitions
+            - Balance variety with coherence
             
-            When creating timelines:
-            - First use compose_timeline to create the edit
-            - Then use render_video to create the output
-            - Always create a preview first (preview=true, 640x360)
-            - Only render full quality after approval""",
-            tools=[compose_timeline_tool, render_video_tool]
+            CREATIVE GUIDELINES:
+            - Avoid repetition - each clip should add something new
+            - Build narrative arcs with beginning, middle, and end
+            - Match visual energy to musical dynamics
+            - Use the highest quality and most relevant clips
+            - Create videos people will want to watch multiple times
+            
+            TECHNICAL WORKFLOW:
+            1. Always start with plan_edit to get an AI-generated edit plan
+            2. Pass the edit_plan result to compose_timeline
+            3. Create a preview first (preview=true, 640x360)
+            4. Only render full quality after approval
+            
+            Remember: The AI planning step is crucial - it ensures intelligent
+            clip selection and arrangement based on content understanding.""",
+            tools=[plan_edit_tool, compose_timeline_tool, render_video_tool]
         )
     
     @property
@@ -81,7 +93,7 @@ class CompositionAgent(Agent):
             Updated project state with timeline and rendered output
         """
         try:
-            logger.info(f"Creating memory movie: {target_duration}s, style={style}")
+            log_start(logger, f"Creating memory movie: {target_duration}s, style={style}")
             
             # Validate we have analyzed media
             if not project_state.user_inputs.media:
@@ -95,10 +107,25 @@ class CompositionAgent(Agent):
             if analyzed_count == 0:
                 raise ValueError("No analyzed media found. Run AnalysisAgent first.")
             
-            # Create timeline
-            logger.info("Creating timeline...")
+            # Step 1: Create AI edit plan
+            log_update(logger, "Creating AI edit plan...")
+            plan_result = await plan_edit_tool.run(
+                project_state=project_state.model_dump(),
+                target_duration=target_duration,
+                style=style
+            )
+            
+            if plan_result["status"] != "success":
+                raise RuntimeError(f"Edit planning failed: {plan_result.get('error')}")
+            
+            log_update(logger, f"Edit plan created with {plan_result['segment_count']} segments")
+            log_update(logger, f"Variety score: {plan_result.get('variety_score', 0):.2f}, Story coherence: {plan_result.get('story_coherence', 0):.2f}")
+            
+            # Step 2: Execute the edit plan into a timeline
+            log_update(logger, "Executing edit plan into timeline...")
             timeline_result = await compose_timeline_tool.run(
                 project_state=project_state.model_dump(),
+                edit_plan=plan_result["edit_plan"],
                 target_duration=target_duration,
                 style=style
             )
@@ -108,13 +135,13 @@ class CompositionAgent(Agent):
             
             # Update state with timeline
             project_state = ProjectState(**timeline_result["updated_state"])
-            logger.info(f"Timeline created with {len(project_state.timeline.segments)} segments")
+            log_update(logger, f"Timeline created with {len(project_state.timeline.segments)} segments")
             
             # Determine output filename
             output_name = f"memory_movie_{'preview' if preview_only else 'final'}.mp4"
             
             # Render video
-            logger.info(f"Rendering {'preview' if preview_only else 'final'} video...")
+            log_update(logger, f"Rendering {'preview' if preview_only else 'final'} video...")
             render_result = await render_video_tool.run(
                 project_state=project_state.model_dump(),
                 output_filename=output_name,
@@ -132,7 +159,7 @@ class CompositionAgent(Agent):
             if project_state.project_status.phase == "composing":
                 project_state.project_status.phase = "evaluating"
             
-            logger.info(f"Video rendered successfully: {render_result['output_path']}")
+            log_complete(logger, f"Video rendered successfully: {render_result['output_path']}")
             
             return project_state
             

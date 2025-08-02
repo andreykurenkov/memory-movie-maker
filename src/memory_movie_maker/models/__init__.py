@@ -32,6 +32,10 @@ from .analysis import (
     ContentTag,
     QualityMetrics,
 )
+from .edit_plan import (
+    EditPlan,
+    PlannedSegment,
+)
 
 __all__ = [
     # Project State
@@ -57,4 +61,7 @@ __all__ = [
     "MediaScore",
     "ContentTag",
     "QualityMetrics",
+    # Edit Plan
+    "EditPlan",
+    "PlannedSegment",
 ]

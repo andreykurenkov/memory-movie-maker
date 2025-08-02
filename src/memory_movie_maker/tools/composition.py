@@ -6,12 +6,17 @@ from dataclasses import dataclass
 import random
 from collections import defaultdict
 
-from google.adk.tools import FunctionTool
+try:
+    from google.adk.tools import FunctionTool
+    ADK_AVAILABLE = True
+except ImportError:
+    ADK_AVAILABLE = False
 
-from ..models.timeline import Timeline, Segment, TransitionType
+from ..models.timeline import Timeline, TimelineSegment, TransitionType
 from ..models.media_asset import MediaAsset, MediaType, AudioAnalysisProfile
 from ..models.project_state import ProjectState
-
+from ..models.edit_plan import EditPlan, PlannedSegment
+from ..utils.simple_logger import log_start, log_update, log_complete
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +169,7 @@ class CompositionAlgorithm:
         clusters: List[MediaCluster],
         music_profile: AudioAnalysisProfile,
         target_duration: int
-    ) -> List[Segment]:
+    ) -> List[TimelineSegment]:
         """Create segments synchronized to music beats."""
         segments = []
         beat_times = music_profile.beat_timestamps[:target_duration * 2]  # Rough beat limit
@@ -226,7 +231,7 @@ class CompositionAlgorithm:
         self,
         clusters: List[MediaCluster],
         target_duration: int
-    ) -> List[Segment]:
+    ) -> List[TimelineSegment]:
         """Create simple chronological timeline."""
         segments = []
         current_time = 0.0
@@ -260,7 +265,7 @@ class CompositionAlgorithm:
         media: MediaAsset,
         start_time: float,
         duration: float
-    ) -> Segment:
+    ) -> TimelineSegment:
         """Create a timeline segment from a media asset."""
         effects = []
         
@@ -285,7 +290,7 @@ class CompositionAlgorithm:
                     trim_start = best_segment.start_time
                     trim_end = best_segment.end_time
         
-        return Segment(
+        return TimelineSegment(
             media_id=media.id,
             start_time=start_time,
             duration=duration,
@@ -296,9 +301,9 @@ class CompositionAlgorithm:
     
     def _apply_transitions(
         self,
-        segments: List[Segment],
+        segments: List[TimelineSegment],
         style_preferences: Dict[str, Any]
-    ) -> List[Segment]:
+    ) -> List[TimelineSegment]:
         """Apply transitions between segments."""
         transition_style = style_preferences.get("transition_style", "smooth")
         
@@ -323,13 +328,15 @@ class CompositionAlgorithm:
 # Create the composition tool function
 async def compose_timeline(
     project_state: Dict[str, Any],
+    edit_plan: Dict[str, Any],
     target_duration: int = 60,
     style: str = "auto"
 ) -> Dict[str, Any]:
-    """Create video timeline from analyzed media.
+    """Create video timeline from an AI-generated edit plan.
     
     Args:
         project_state: Current project state
+        edit_plan: AI-generated edit plan with segments
         target_duration: Target video duration in seconds
         style: Style preference (auto, smooth, dynamic, fast)
         
@@ -337,43 +344,78 @@ async def compose_timeline(
         Result with timeline or error
     """
     try:
+        log_start(logger, "Creating timeline from edit plan")
+        
         # Parse project state
         state = ProjectState(**project_state)
         
-        # Get media assets
-        media_pool = state.user_inputs.media
+        # Parse edit plan
+        plan = EditPlan(**edit_plan)
+        
+        # Get media assets lookup
+        media_lookup = {asset.id: asset for asset in state.user_inputs.media}
         
         # Find music track if available
-        music_profile = None
-        for media in media_pool:
-            if media.type == MediaType.AUDIO and media.audio_analysis:
-                music_profile = media.audio_analysis
+        music_track_id = None
+        for media in state.user_inputs.media:
+            if media.type == MediaType.AUDIO:
+                music_track_id = media.id
                 break
         
-        # Style preferences
+        # Convert planned segments to timeline segments
+        segments = []
+        for planned_seg in plan.segments:
+            # Get the media asset
+            if planned_seg.media_id not in media_lookup:
+                logger.warning(f"Media ID {planned_seg.media_id} not found, skipping")
+                continue
+            
+            media = media_lookup[planned_seg.media_id]
+            
+            # Create timeline segment
+            segment = TimelineSegment(
+                media_asset_id=planned_seg.media_id,
+                start_time=planned_seg.start_time,
+                end_time=planned_seg.start_time + planned_seg.duration,
+                duration=planned_seg.duration,
+                in_point=planned_seg.trim_start,
+                out_point=planned_seg.trim_end,
+                transition_in=TransitionType.CUT if planned_seg.start_time == 0 else TransitionType[planned_seg.transition_type.upper()],
+                transition_out=TransitionType.CUT,  # Will be set by transitions
+                effects=planned_seg.effect_suggestions if planned_seg.effect_suggestions else []
+            )
+            
+            # Add Ken Burns effect for photos
+            if media.type == MediaType.IMAGE and "ken_burns" not in segment.effects:
+                segment.effects.append("ken_burns")
+            
+            segments.append(segment)
+            log_update(logger, f"Added segment: {media.file_path.split('/')[-1]} ({planned_seg.duration:.1f}s)")
+        
+        # Apply transitions based on style
         style_prefs = {
-            "transition_style": "smooth" if style == "smooth" else "dynamic",
-            "pacing": "fast" if style == "fast" else "normal"
+            "transition_style": "smooth" if style == "smooth" else "dynamic"
         }
+        algorithm = CompositionAlgorithm()
+        segments = algorithm._apply_transitions(segments, style_prefs)
         
         # Create timeline
-        algorithm = CompositionAlgorithm()
-        timeline = algorithm.compose_timeline(
-            media_pool=media_pool,
-            music_profile=music_profile,
-            target_duration=target_duration,
-            style_preferences=style_prefs
+        timeline = Timeline(
+            segments=segments,
+            total_duration=plan.total_duration,
+            music_track_id=music_track_id
         )
         
         # Update project state
         state.timeline = timeline
         
-        logger.info(f"Created timeline with {len(timeline.segments)} segments")
+        log_complete(logger, f"Timeline created with {len(timeline.segments)} segments, {timeline.total_duration:.1f}s total")
         
         return {
             "status": "success",
             "timeline": timeline.model_dump(),
-            "updated_state": state.model_dump()
+            "updated_state": state.model_dump(),
+            "narrative_notes": plan.narrative_structure
         }
         
     except Exception as e:
@@ -385,8 +427,11 @@ async def compose_timeline(
 
 
 # Create ADK tool
-compose_timeline_tool = FunctionTool(
-    compose_timeline,
-    name="compose_timeline",
-    description="Create video timeline from analyzed media assets"
-)
+if ADK_AVAILABLE:
+    compose_timeline_tool = FunctionTool(
+        compose_timeline,
+        name="compose_timeline",
+        description="Execute an AI-generated edit plan to create video timeline"
+    )
+else:
+    compose_timeline_tool = None

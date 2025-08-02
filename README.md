@@ -21,26 +21,11 @@ Memory Movie Maker leverages Google's Agent Development Kit (ADK) and advanced A
 
 - Python 3.10+
 - FFmpeg (for video processing)
-- Git
+- Gemini API key (get one at https://makersuite.google.com/app/apikey)
+- 8GB+ RAM recommended
+- 10GB+ free disk space
 
 ### Installation
-
-#### Automated Setup (Recommended)
-
-```bash
-git clone https://github.com/yourusername/memory-movie-maker.git
-cd memory-movie-maker
-python scripts/setup_dev_env.py
-```
-
-This will:
-- Check Python version and FFmpeg
-- Create virtual environment
-- Install all dependencies
-- Set up configuration files
-- Create required directories
-
-#### Manual Setup
 
 1. Clone the repository:
 ```bash
@@ -48,112 +33,208 @@ git clone https://github.com/yourusername/memory-movie-maker.git
 cd memory-movie-maker
 ```
 
-2. Create a virtual environment:
+2. Create and activate virtual environment:
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-3. Install dependencies:
+3. Install the package:
 ```bash
-pip install -e ".[dev]"  # For development
-# or
-pip install -e .         # For usage only
+pip install -e .
 ```
 
-4. Set up environment variables:
+4. Set up your API key:
 ```bash
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env and add your GEMINI_API_KEY
 ```
 
 ### Usage
 
-1. Start the web interface:
+#### Option 1: Web Interface (Recommended)
+
 ```bash
-python -m memory_movie_maker
+python scripts/launch_web_app.py
+# Open http://localhost:7860 in your browser
 ```
 
-2. Open your browser to `http://localhost:7860`
+#### Option 2: Command Line
 
-3. Upload your media files and music
+```bash
+# Basic usage
+python scripts/create_memory_movie.py photo1.jpg photo2.jpg video1.mp4 \
+    -p "Create a beautiful vacation montage" \
+    -m background_music.mp3 \
+    -d 60
 
-4. Describe your vision (e.g., "Create a 2-minute upbeat video of our Hawaii vacation")
+# With specific style
+python scripts/create_memory_movie.py media/*.* \
+    -p "Dynamic sports highlights with fast cuts" \
+    -s fast \
+    -d 30
 
-5. Wait for AI to generate your video
+# Quick mode (no auto-refinement)
+python scripts/create_memory_movie.py *.jpg \
+    -p "Simple photo slideshow" \
+    --no-refine
+```
 
-6. Provide feedback to refine (e.g., "Add more sunset shots, make the beginning slower")
+#### Option 3: Python API
+
+```python
+from memory_movie_maker.agents.root_agent import RootAgent
+import asyncio
+
+async def create_video():
+    agent = RootAgent()
+    result = await agent.create_memory_movie(
+        media_paths=["photo1.jpg", "photo2.jpg", "video1.mp4"],
+        user_prompt="Create a romantic anniversary video",
+        music_path="love_song.mp3",
+        target_duration=60,
+        style="smooth",
+        auto_refine=True
+    )
+    print(f"Video created: {result['video_path']}")
+
+asyncio.run(create_video())
+```
 
 ## Architecture
 
-Memory Movie Maker uses a multi-agent architecture:
+Memory Movie Maker uses a multi-agent architecture with a self-correction loop:
 
-- **RootAgent**: Orchestrates the entire workflow
-- **AnalysisAgent**: Analyzes media content and music
-- **CompositionAgent**: Creates video timelines and renders output
-- **EvaluationAgent**: Reviews quality and adherence to user intent
-- **RefinementAgent**: Translates feedback into editing commands
+```
+User Input → RootAgent → AnalysisAgent → CompositionAgent → EvaluationAgent
+                              ↑                                      ↓
+                              ←──── RefinementAgent ←────────────────
+```
+
+### Agents
+
+- **RootAgent**: Orchestrates the workflow sequentially (no LLM decision-making needed)
+- **AnalysisAgent**: Analyzes media files using:
+  - Gemini for visual understanding (native video analysis)
+  - Librosa for technical audio features (beats, tempo, energy)
+  - Gemini for semantic audio analysis (speech, emotions)
+- **CompositionAgent**: Creates beat-synced timelines and renders videos
+- **EvaluationAgent**: Scores videos (1-10) and suggests specific improvements
+- **RefinementAgent**: Parses feedback into actionable edit commands
+
+### Self-Correction Loop
+
+The system automatically refines videos up to 3 times:
+1. Create initial video
+2. Evaluate quality (target: 7.0+ score)
+3. If needed, apply refinements and re-render
+4. Repeat until acceptable or max iterations reached
 
 ## Troubleshooting
 
-### Common Setup Issues
+### Installation Issues
 
-#### FFmpeg Installation
-- **macOS**: If `brew install ffmpeg` fails, try `brew update` first
-- **Ubuntu**: For codec issues, install with: `sudo apt install ffmpeg libavcodec-extra`
-- **Windows**: Ensure FFmpeg bin directory is in PATH. Test with: `ffmpeg -version`
+**FFmpeg not found**:
+```bash
+# macOS
+brew install ffmpeg
 
-#### Python Environment
-- **ImportError**: Ensure virtual environment is activated: `source venv/bin/activate`
-- **Version Error**: Requires Python 3.10+. Check with: `python --version`
-- **Package conflicts**: Try clean install: `pip install --force-reinstall -e .`
+# Ubuntu/Debian  
+sudo apt update && sudo apt install ffmpeg
 
-#### API Setup
-- **Gemini API errors**: 
-  - Check API key is set in `.env`
-  - Verify quotas at: https://console.cloud.google.com/apis/api/generativelanguage.googleapis.com
-  - For 429 errors, implement retry with exponential backoff
+# Windows
+# Download from https://ffmpeg.org/download.html
+# Add to PATH environment variable
+```
 
-#### Memory Issues
-- **Large video processing**: 
-  - Reduce batch size in config
-  - Increase swap space
-  - Use lower resolution for testing
+**Gemini API errors**:
+- "API key not valid": Check GEMINI_API_KEY in .env
+- "Quota exceeded": Wait or upgrade at https://console.cloud.google.com
+- Set `GOOGLE_GENAI_USE_VERTEXAI=False` for direct API usage
 
-### Performance Optimization
+**Memory errors with large videos**:
+- Use `--no-refine` flag for faster processing
+- Reduce video resolution in settings
+- Process fewer files at once
 
-- **Slow analysis**: Enable caching in `.env`: `ANALYSIS_CACHE_ENABLED=True`
-- **Long render times**: Use lower quality settings for testing
-- **API rate limits**: Batch requests and implement caching
+### Performance Tips
+
+- **Faster processing**: Use `--no-refine` to skip quality improvements
+- **Better quality**: Keep auto-refine enabled (default)
+- **Batch processing**: The system processes media files concurrently
+- **Caching**: Analysis results are cached to avoid re-processing
 
 ## Development
 
 ### Quick Start for New Developers
 
-1. **Understand the architecture**: Read [CLAUDE.md](CLAUDE.md) Section "Developer Quick Start"
-2. **Explore examples**: Check `examples/` directory for implementation patterns
-3. **Run a single agent**: See `examples/agents/sample_analysis_agent.py`
-4. **Debug with logging**: Set `LOG_LEVEL=DEBUG` in `.env`
+1. **Read the docs**:
+   - [CLAUDE.md](CLAUDE.md) - Complete developer guide
+   - [ROOT_AGENT_GUIDE.md](docs/ROOT_AGENT_GUIDE.md) - Orchestration details
+   - [TDD.md](docs/TDD.md) - Technical design and architecture
 
-### 🚀 Next Implementation Step
+2. **Run example scripts**:
+   ```bash
+   # Test individual components
+   python scripts/test_visual_analysis.py
+   python scripts/test_audio_with_real_file.py
+   python scripts/test_composition.py
+   
+   # Test complete workflow
+   python scripts/test_root_agent.py
+   ```
 
-**Storage Layer Implementation** - See [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md) for detailed guide on implementing the storage abstraction layer.
+3. **Debug with enhanced logging**:
+   ```bash
+   # Enable debug logging
+   export LOG_LEVEL=DEBUG
+   python scripts/create_memory_movie.py ...
+   ```
 
-### Project Structure
-
-See [docs/TDD.md](docs/TDD.md) for detailed project structure.
-
-### Running Tests
+### Testing
 
 ```bash
 # Run all tests
 pytest
 
 # Run with coverage
-pytest --cov=src
+pytest --cov=src --cov-report=html
 
-# Run specific test suite
-pytest tests/unit/
+# Run specific test categories
+pytest tests/unit/          # Unit tests only
+pytest tests/integration/   # Integration tests only
+
+# Run tests for specific component
+pytest tests/unit/test_composition.py
+pytest -k "test_root_agent"
+```
+
+### Key Features Explained
+
+**🎵 Beat Synchronization**: Videos automatically sync cuts to music beats using Librosa's tempo detection
+
+**🤖 Self-Correction**: The system evaluates its own output and makes improvements before showing you
+
+**💬 Natural Language**: Just describe what you want - no need to learn complex editing tools
+
+**📊 Quality Scoring**: Each video gets a quality score (1-10) with specific improvement suggestions
+
+**🔄 Iterative Refinement**: Make changes with simple commands like "make it slower" or "add more transitions"
+
+### Code Quality
+
+```bash
+# Format code
+black src/ tests/
+
+# Sort imports  
+isort src/ tests/
+
+# Type checking
+mypy src/
+
+# Linting
+flake8 src/ tests/
 ```
 
 ### Contributing
@@ -165,10 +246,11 @@ pytest tests/unit/
 
 ## Documentation
 
-- [Product Requirements](docs/PRD.md)
-- [Technical Design](docs/TDD.md)
-- [Development Roadmap](docs/roadmap.md)
-- [AI Context](CLAUDE.md)
+- [CLAUDE.md](CLAUDE.md) - Complete developer guide and project context
+- [Product Requirements](docs/PRD.md) - What we're building and why
+- [Technical Design](docs/TDD.md) - How it's built
+- [Development Roadmap](docs/roadmap.md) - Progress and next steps
+- [RootAgent Guide](docs/ROOT_AGENT_GUIDE.md) - Orchestration details
 
 ## License
 
