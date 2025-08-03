@@ -66,7 +66,7 @@ class EditPlanner:
         
         # Build the prompt
         prompt = self._build_edit_prompt(
-            media_assets, music_profile, target_duration, user_prompt, style_preferences
+            media_assets, music_profile, target_duration, user_prompt, style_preferences, music_asset
         )
         
         # Call Gemini
@@ -86,7 +86,8 @@ class EditPlanner:
         music_profile: Optional[AudioAnalysisProfile],
         target_duration: int,
         user_prompt: str,
-        style_preferences: Dict[str, Any]
+        style_preferences: Dict[str, Any],
+        music_asset: Optional[MediaAsset] = None
     ) -> str:
         """Build a detailed prompt for Gemini."""
         
@@ -150,6 +151,30 @@ class EditPlanner:
                 "beat_count": len(music_profile.beat_timestamps),
                 "energy_curve_summary": self._summarize_energy_curve(music_profile.energy_curve)
             }
+            
+            # Add detailed musical segmentation if available
+            if music_asset and music_asset.semantic_audio_analysis:
+                semantic = music_asset.semantic_audio_analysis
+                music_info["musical_structure"] = semantic.get("musical_structure_summary", "")
+                music_info["energy_peaks"] = semantic.get("energy_peaks", [])
+                music_info["recommended_cut_points"] = semantic.get("recommended_cut_points", [])
+                music_info["key_moments"] = semantic.get("key_moments", [])
+                
+                # Include musical segments
+                if semantic.get("segments"):
+                    music_info["detailed_segments"] = [
+                        {
+                            "start": seg.get("start_time", 0),
+                            "end": seg.get("end_time", 0),
+                            "type": seg.get("type", ""),
+                            "content": seg.get("content", ""),
+                            "musical_structure": seg.get("musical_structure"),
+                            "energy_transition": seg.get("energy_transition"),
+                            "sync_priority": seg.get("sync_priority", 0.5)
+                        }
+                        for seg in semantic.get("segments", [])
+                        if seg.get("type") in ["music", "intro", "verse", "chorus", "bridge", "outro", "drop", "buildup"]
+                    ]
         
         # Build the prompt with artistic direction
         prompt = f"""You are an award-winning video editor creating a compelling memory movie. Your goal is to craft an emotionally resonant video that captures the essence of the memory while maintaining professional editing standards.
@@ -189,10 +214,17 @@ CREATIVE GUIDELINES:
    - Use smooth transitions for emotional scenes, cuts for energy
 
 5. MUSIC SYNCHRONIZATION (if applicable):
-   - Place key visual moments on strong beats
+   - Place key visual moments on strong beats and musical transitions
    - Match cutting rhythm to tempo: Fast music = shorter clips
    - Use energy curve: High energy → dynamic cuts, Low energy → longer takes
    - Leave space for the music to breathe
+   
+   IMPORTANT: If detailed musical segments are provided:
+   - Sync major visual transitions with musical structure changes (verse→chorus, buildup→drop)
+   - Use "sync_priority" scores to identify must-sync moments
+   - Align emotional peaks in visuals with "energy_peaks" in music
+   - Cut on "recommended_cut_points" for natural flow
+   - Match visual energy to "energy_transition" states (building, dropping, peak, valley)
 
 Return a complete edit plan as JSON:
 {{
@@ -372,7 +404,8 @@ async def plan_edit(
             music_profile=music_track,
             target_duration=target_duration,
             user_prompt=user_prompt,
-            style_preferences=style_prefs
+            style_preferences=style_prefs,
+            music_asset=music_asset
         )
         
         return {

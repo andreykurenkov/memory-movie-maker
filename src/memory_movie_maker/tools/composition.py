@@ -291,12 +291,13 @@ class CompositionAlgorithm:
                     trim_end = best_segment.end_time
         
         return TimelineSegment(
-            media_id=media.id,
+            media_asset_id=media.id,
             start_time=start_time,
+            end_time=start_time + duration,
             duration=duration,
-            effects=effects,
-            trim_start=trim_start,
-            trim_end=trim_end
+            in_point=trim_start,
+            out_point=trim_end,
+            effects=effects
         )
     
     def _apply_transitions(
