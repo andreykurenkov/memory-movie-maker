@@ -155,7 +155,8 @@ class AnalysisAgent(Agent):
             
             if result["status"] == "success":
                 # Update media asset with analysis
-                media_asset.gemini_analysis = result["analysis"]
+                from ..models.media_asset import GeminiAnalysis
+                media_asset.gemini_analysis = GeminiAnalysis(**result["analysis"])
             else:
                 logger.error(f"Visual analysis failed for {Path(media_asset.file_path).name}: {result.get('error')}")
             
@@ -175,7 +176,8 @@ class AnalysisAgent(Agent):
             
             if result["status"] == "success":
                 # Update media asset with analysis
-                media_asset.audio_analysis = result["analysis"]
+                from ..models.media_asset import AudioAnalysisProfile
+                media_asset.audio_analysis = AudioAnalysisProfile(**result["analysis"])
                 log_update(logger, f"Audio analysis complete: {result['analysis']['tempo_bpm']:.0f} BPM, {len(result['analysis']['beat_timestamps'])} beats")
             else:
                 logger.error(f"Audio analysis failed: {result.get('error')}")
