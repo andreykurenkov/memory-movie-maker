@@ -374,12 +374,16 @@ async def plan_edit(
         music_track = None
         music_asset = None
         
+        # Get visual media from media field
         for asset in state.user_inputs.media:
             if asset.type in [MediaType.IMAGE, MediaType.VIDEO]:
                 visual_media.append(asset)
-            elif asset.type == MediaType.AUDIO and asset.audio_analysis:
-                music_track = asset.audio_analysis
-                music_asset = asset  # Keep the full asset for semantic analysis
+        
+        # Get music from music field
+        if state.user_inputs.music and len(state.user_inputs.music) > 0:
+            music_asset = state.user_inputs.music[0]  # Use first music track
+            if music_asset.audio_analysis:
+                music_track = music_asset.audio_analysis
         
         if not visual_media:
             return {

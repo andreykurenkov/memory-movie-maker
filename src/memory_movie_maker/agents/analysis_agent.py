@@ -69,14 +69,18 @@ class AnalysisAgent(Agent):
         """
         # Get all media files
         media_files = project_state.user_inputs.media
+        music_files = project_state.user_inputs.music
         
-        log_start(logger, f"Analyzing {len(media_files)} media files")
+        # Combine all files for analysis
+        all_files = media_files + music_files
+        
+        log_start(logger, f"Analyzing {len(media_files)} media files and {len(music_files)} music tracks")
         
         # Create batches for concurrent processing
         visual_tasks = []
         audio_tasks = []
         
-        for media_asset in media_files:
+        for media_asset in all_files:
             # Skip if already analyzed and caching is enabled
             if self._is_fully_analyzed(media_asset) and project_state.analysis_cache_enabled:
                 log_update(logger, f"Skipping {Path(media_asset.file_path).name} - already analyzed")

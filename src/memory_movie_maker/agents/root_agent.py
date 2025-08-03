@@ -296,6 +296,7 @@ class RootAgent:
         """Initialize project state from user inputs."""
         # Create media assets
         media_assets = []
+        music_assets = []
         
         # Add main media files
         for path in media_paths:
@@ -317,11 +318,12 @@ class RootAgent:
                 type=MediaType.AUDIO,
                 metadata={"role": "background_music"}
             )
-            media_assets.append(music_asset)
+            music_assets.append(music_asset)
         
         # Create user inputs
         user_inputs = UserInputs(
             media=media_assets,
+            music=music_assets,
             initial_prompt=user_prompt,
             target_duration=target_duration,
             style_preferences={"style": style}

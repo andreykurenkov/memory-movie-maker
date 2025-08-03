@@ -353,15 +353,13 @@ async def compose_timeline(
         # Parse edit plan
         plan = EditPlan(**edit_plan)
         
-        # Get media assets lookup
+        # Get media assets lookup  
         media_lookup = {asset.id: asset for asset in state.user_inputs.media}
         
         # Find music track if available
         music_track_id = None
-        for media in state.user_inputs.media:
-            if media.type == MediaType.AUDIO:
-                music_track_id = media.id
-                break
+        if state.user_inputs.music and len(state.user_inputs.music) > 0:
+            music_track_id = state.user_inputs.music[0].id
         
         # Convert planned segments to timeline segments
         segments = []
