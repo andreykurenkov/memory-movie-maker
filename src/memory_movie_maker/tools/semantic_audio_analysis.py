@@ -3,12 +3,10 @@
 import logging
 from typing import Dict, Any, List, Optional
 import asyncio
-from pathlib import Path
 import json
 
 from pydantic import BaseModel, Field
 from google import genai
-from ..models.media_asset import MediaAsset
 from ..config import settings
 from ..storage.interface import StorageInterface
 
@@ -106,10 +104,11 @@ class SemanticAudioAnalysisTool:
             # Wait for processing
             while audio_file.state == "PROCESSING":
                 await asyncio.sleep(1)
-                audio_file = await loop.run_in_executor(
-                    None,
-                    lambda: self._client.files.get(name=audio_file.name)
-                )
+                if audio_file and hasattr(audio_file, 'name'):
+                    audio_file = await loop.run_in_executor(
+                        None,
+                        lambda: self._client.files.get(name=audio_file.name)
+                    )
             
             if audio_file.state == "FAILED":
                 raise Exception(f"Audio upload failed: {audio_file.error}")
@@ -213,7 +212,8 @@ Be extremely precise with timestamps - video editors need exact frame-accurate t
             )
             
             # Parse response
-            result_text = response.text.strip()
+            result_text = response.text if hasattr(response, 'text') else str(response)
+            result_text = result_text.strip()
             if result_text.startswith("```json"):
                 result_text = result_text[7:]
             if result_text.endswith("```"):
@@ -260,14 +260,20 @@ Be extremely precise with timestamps - video editors need exact frame-accurate t
             logger.error(f"Failed to analyze audio content: {e}")
             # Return a basic analysis on error
             return SemanticAudioAnalysis(
+                transcript=None,
                 summary="Audio analysis failed",
                 emotional_tone="unknown",
                 segments=[],
                 speakers=[],
-                topics=[]
+                topics=[],
+                key_moments=[],
+                sound_elements={},
+                musical_structure_summary=None,
+                energy_peaks=None,
+                recommended_cut_points=None
             )
     
-    async def _cleanup_file(self, file: Any):
+    async def _cleanup_file(self, file: Any) -> None:
         """Clean up uploaded file."""
         try:
             loop = asyncio.get_event_loop()

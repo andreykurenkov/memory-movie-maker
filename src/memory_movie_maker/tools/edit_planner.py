@@ -19,7 +19,6 @@ except ImportError:
 from ..config import settings
 from ..models.media_asset import MediaAsset, MediaType, AudioAnalysisProfile
 from ..models.project_state import ProjectState
-from ..models.timeline import TransitionType
 from ..models.edit_plan import EditPlan, PlannedSegment
 from ..utils.simple_logger import log_start, log_update, log_complete
 

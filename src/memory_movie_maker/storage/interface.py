@@ -1,8 +1,7 @@
 """Abstract storage interface for Memory Movie Maker."""
 
 from abc import ABC, abstractmethod
-from typing import BinaryIO, Optional
-from pathlib import Path
+from typing import BinaryIO
 
 
 class StorageInterface(ABC):

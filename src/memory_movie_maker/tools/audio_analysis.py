@@ -1,7 +1,7 @@
 """Audio analysis tool using Librosa for music and sound analysis."""
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple
 import numpy as np
 import librosa
 import asyncio

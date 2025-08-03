@@ -5,7 +5,7 @@ Defines structures for media analysis results,
 clustering, scoring, and content categorization.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 from pydantic import BaseModel, Field, validator
 from datetime import datetime
 

@@ -19,7 +19,7 @@ from ..agents.analysis_agent import AnalysisAgent
 from ..agents.composition_agent import CompositionAgent
 from ..agents.evaluation_agent import EvaluationAgent  
 from ..agents.refinement_agent import RefinementAgent
-from ..utils.simple_logger import log_start, log_update, log_complete
+from ..utils.simple_logger import log_start, log_complete
 
 logger = logging.getLogger(__name__)
 
@@ -392,7 +392,7 @@ async def test_root_agent():
     )
     
     if result["status"] == "success":
-        print(f"\n✅ Memory movie created successfully!")
+        print("\n✅ Memory movie created successfully!")
         print(f"Video path: {result['video_path']}")
         print(f"Refinement iterations: {result['refinement_iterations']}")
         print(f"Final score: {result['final_score']}")

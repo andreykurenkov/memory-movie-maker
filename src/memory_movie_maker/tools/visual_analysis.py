@@ -1,11 +1,9 @@
 """Visual analysis tool using Gemini API for image and video analysis."""
 
-import base64
-import io
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional
 import asyncio
 import json
 
@@ -28,9 +26,7 @@ try:
 except ImportError:
     ADK_AVAILABLE = False
 
-from PIL import Image as PILImage
 import cv2
-import numpy as np
 
 from ..config import settings
 from ..models.media_asset import GeminiAnalysis

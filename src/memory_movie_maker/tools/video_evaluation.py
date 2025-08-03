@@ -1,7 +1,7 @@
 """Video evaluation tool using Gemini for critique."""
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 import json
 import asyncio
 from pathlib import Path

@@ -1,6 +1,5 @@
 """Utility functions for storage operations."""
 
-import os
 import re
 import mimetypes
 from pathlib import Path

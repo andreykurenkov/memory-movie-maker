@@ -1,7 +1,7 @@
 """Composition tool for creating video timelines from analyzed media."""
 
 import logging
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import random
 from collections import defaultdict
@@ -15,7 +15,7 @@ except ImportError:
 from ..models.timeline import Timeline, TimelineSegment, TransitionType
 from ..models.media_asset import MediaAsset, MediaType, AudioAnalysisProfile
 from ..models.project_state import ProjectState
-from ..models.edit_plan import EditPlan, PlannedSegment
+from ..models.edit_plan import EditPlan
 from ..utils.simple_logger import log_start, log_update, log_complete
 
 logger = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ class CompositionAlgorithm:
         # Create timeline
         timeline = Timeline(
             segments=segments,
-            audio_track_id=music_profile.file_path if music_profile else None,
+            music_track_id=music_profile.file_path if music_profile else None,
             total_duration=sum(s.duration for s in segments)
         )
         

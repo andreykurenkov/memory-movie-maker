@@ -2,14 +2,12 @@
 
 import asyncio
 import shutil
-import tempfile
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import BinaryIO, Optional
+from typing import BinaryIO
 import aiofiles
 import aiofiles.os
-from contextlib import asynccontextmanager
 
 from .interface import StorageInterface, StorageError
 from .utils import (

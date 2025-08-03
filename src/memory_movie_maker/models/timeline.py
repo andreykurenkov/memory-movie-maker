@@ -6,7 +6,7 @@ including segments, transitions, and render settings.
 """
 
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 from pydantic import BaseModel, Field, validator
 
 
@@ -14,8 +14,11 @@ class TransitionType(str, Enum):
     """Available transition effects between clips."""
     CUT = "cut"
     FADE = "fade"
+    FADE_TO_BLACK = "fade_to_black"
     CROSSFADE = "crossfade"
     DISSOLVE = "dissolve"
+    SLIDE_LEFT = "slide_left"
+    SLIDE_RIGHT = "slide_right"
     WIPE_LEFT = "wipe_left"
     WIPE_RIGHT = "wipe_right"
     WIPE_UP = "wipe_up"

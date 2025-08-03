@@ -5,10 +5,9 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Optional
 
 from google.adk.agents import Agent
-from google.adk.runners import InMemoryRunner
 
 from ..tools.visual_analysis import visual_analysis_tool
 from ..tools.audio_analysis import audio_analysis_tool

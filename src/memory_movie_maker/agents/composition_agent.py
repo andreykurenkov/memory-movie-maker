@@ -2,7 +2,6 @@
 
 import logging
 from typing import Dict, Any, Optional
-from pathlib import Path
 
 from google.adk.agents import Agent
 

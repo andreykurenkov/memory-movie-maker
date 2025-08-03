@@ -5,7 +5,7 @@ Defines structures for AI-generated edit plans including
 segment selections, timing, and creative reasoning.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 from pydantic import BaseModel, Field, validator
 
 

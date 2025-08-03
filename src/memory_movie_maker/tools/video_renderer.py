@@ -1,7 +1,6 @@
 """Video rendering tool using MoviePy."""
 
 import logging
-import os
 from typing import Dict, Any, List, Tuple, Optional
 import tempfile
 from pathlib import Path
@@ -9,8 +8,7 @@ from pathlib import Path
 from google.adk.tools import FunctionTool
 from moviepy.editor import (
     VideoFileClip, ImageClip, CompositeVideoClip,
-    concatenate_videoclips, AudioFileClip, ColorClip,
-    CompositeAudioClip
+    concatenate_videoclips, AudioFileClip, ColorClip
 )
 from moviepy.video.fx import resize, fadeout, fadein
 from moviepy.video.fx.fadein import fadein
