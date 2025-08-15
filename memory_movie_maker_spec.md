@@ -1005,95 +1005,48 @@ export class AgentAPI {
 - Mobile-responsive design
 - Keyboard shortcuts for common actions
 
-### Phase 4: Production Deployment (2-3 weeks)
+### Phase 4: Production Deployment
 
-#### 4.1 Infrastructure Setup
-**Status**: Not Started | **Priority**: Medium
+**Implementation Goal**: Deploy a fully functional web application that allows users to create memory movies with AI assistance.
 
-**Frontend Deployment (Vercel)**:
-```bash
-# Automated deployment pipeline
-- GitHub integration for continuous deployment
-- Environment variable configuration
-- Custom domain setup with SSL
-- Performance monitoring and analytics
-```
+**Key Requirements**:
+- Web-accessible interface for project creation and management
+- File upload system supporting photos, videos, and audio
+- Integration with the existing AI agent system for video generation
+- User authentication and project persistence
+- Responsive design for desktop and mobile use
 
-**Backend Deployment (Railway/Render)**:
-```bash
-# Production API deployment
-- Docker containerization
-- Environment configuration management
-- Health checks and monitoring
-- Auto-scaling configuration
-- Background worker deployment
-```
+### Implementation Requirements
 
-**Background Processing**:
-```bash
-# Celery worker deployment
-- Redis cluster setup for task queuing
-- Dedicated worker instances for video processing
-- Job monitoring and failure recovery
-- Scaling policies based on queue depth
-```
+**Core Features to Implement**:
+1. **Backend API** - FastAPI server with endpoints for project management, file upload, and AI processing
+2. **Frontend Application** - Next.js web app with authentication, project dashboard, and file upload
+3. **Database Integration** - Supabase setup with the defined schema for user data and projects
+4. **AI Agent Integration** - Connect the web interface to the existing agent system
+5. **Deployment** - Production-ready deployment with proper environment configuration
 
-#### 4.2 Performance Optimization
-**Status**: Not Started | **Priority**: Medium
+### Success Criteria
 
-**Backend Optimizations**:
-- Database connection pooling and query optimization
-- Redis caching for frequently accessed data
-- File upload optimization with chunked transfers
-- Background task prioritization and resource allocation
+**Functional Requirements**:
+- [ ] Users can create accounts and log in
+- [ ] Users can upload photos, videos, and music files
+- [ ] Users can create projects with natural language prompts
+- [ ] AI agents generate videos automatically using uploaded media
+- [ ] Users can refine videos with natural language feedback
+- [ ] Users can download completed videos
+- [ ] Projects persist and users can return to edit them later
 
-**Frontend Optimizations**:
-- Component lazy loading and code splitting
-- Image optimization and responsive loading  
-- Error boundaries for graceful error handling
-- Basic caching for improved performance
-
-### Implementation Timeline
-
-```
-Week 1-2:   FastAPI backend setup + basic endpoints
-Week 3-4:   Supabase integration + database schema
-Week 5-6:   AI agent service integration + background tasks
-Week 7-8:   Next.js frontend setup + authentication
-Week 9-10:  Project dashboard + file upload system
-Week 11-12: Video preview interface + refinement
-Week 13-14: Polish and optimization features
-Week 15-16: AI integration + status polling
-Week 17-18: Production deployment + optimization
-Week 19-20: Testing, bug fixes, and final polish
-```
-
-### Success Metrics
-
-**Technical Milestones**:
-- [ ] Complete API documentation with 100% endpoint coverage
-- [ ] Real-time collaboration with <100ms latency
+**Technical Requirements**:
+- [ ] Responsive web interface (desktop and mobile)
 - [ ] File upload handling for files up to 500MB
-- [ ] Video processing queue with auto-scaling
-- [ ] 99.9% uptime with comprehensive monitoring
+- [ ] Integration with existing AI agent system
+- [ ] Supabase authentication and data persistence
+- [ ] Production deployment with proper environment configuration
 
 **User Experience Goals**:
+- [ ] Intuitive interface requiring minimal learning
 - [ ] Project creation to first video: <5 minutes
-- [ ] Simple refinement with natural language feedback
-- [ ] Mobile-responsive interface 
-- [ ] Intuitive UI requiring no documentation
+- [ ] Simple refinement process with natural language
+- [ ] Clear progress indicators during AI processing
 
-### Risk Mitigation
-
-**Technical Risks**:
-- **Video processing performance**: Implement efficient processing and reasonable limits
-- **File storage costs**: Optimize compression and implement retention policies
-- **User growth**: Design for gradual scaling without over-engineering
-- **AI API rate limits**: Implement intelligent queuing and retry logic
-
-**Business Risks**:
-- **User adoption**: Focus on intuitive UX and core value proposition
-- **Infrastructure costs**: Start simple and scale based on actual usage
-- **Complexity creep**: Maintain MVP focus and resist feature bloat
-
-This roadmap transforms the current AI engine into a polished web application focused on the core goal: helping users create memory movies with AI assistance. The approach prioritizes essential features over advanced collaboration tools.
+This specification guides the implementation of a web application that transforms the current AI engine into a user-friendly service for creating memory movies with AI assistance.
