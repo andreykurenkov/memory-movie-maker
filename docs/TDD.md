@@ -62,7 +62,7 @@ memory-movie-maker/
 │   │   │   ├── __init__.py
 │   │   │   ├── interface.py       # Abstract storage interface
 │   │   │   ├── filesystem.py      # Local filesystem implementation
-│   │   │   ├── s3.py             # S3 storage (future)
+│   │   │   ├── supabase.py       # Supabase storage
 │   │   │   └── utils.py          # Storage utilities
 │   │ 
 │   │   ├── utils/                 # Utility functions
@@ -74,7 +74,7 @@ memory-movie-maker/
 │   │   │
 │   │   └── web/                   # Web interface
 │   │       ├── __init__.py
-│   │       ├── app.py            # Gradio application
+│   │       ├── app.py            # Web application (legacy Gradio)
 │   │       ├── components.py     # UI components
 │   │       └── handlers.py       # Request handlers
 │
@@ -85,7 +85,7 @@ memory-movie-maker/
 │   ├── unit/                     # Unit tests
 │   │   ├── __init__.py
 │   │   ├── test_models.py
-│   │   ├── test_algorithms.py
+│   │   ├── test_agents.py
 │   │   ├── test_tools.py
 │   │   └── test_utils.py
 │   │
@@ -135,7 +135,7 @@ memory-movie-maker/
 - **`agents/`**: Each agent is a separate module implementing ADK patterns
 - **`tools/`**: Reusable tools that agents can use, following ADK tool interface
 - **`models/`**: Pydantic models for type safety and validation
-- **`storage/`**: Abstract interface allows easy migration from filesystem to cloud
+- **`storage/`**: Abstract interface supporting filesystem or Supabase storage
 - **`utils/`**: Shared utilities to avoid code duplication
 - **`web/`**: All web interface code isolated for easy replacement
 
@@ -158,7 +158,7 @@ Memory Movie Maker is designed as a **Multi-Agent System (MAS)** using Google's 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        Web Interface                         │
-│                         (Gradio)                            │
+│                      (Web Interface)                        │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
@@ -501,130 +501,80 @@ def audio_analysis_tool(
         }
 ```
 
-### 2.4 Algorithms
+### 2.4 AI-Powered Edit Planning
 
-#### Chronological Clustering Algorithm
-```python
-def cluster_media_chronologically(
-    media_assets: List[MediaAsset],
-    cluster_threshold: int = 3600  # 1 hour in seconds
-) -> List[List[MediaAsset]]:
-    """
-    Groups media by capture time for narrative flow.
-    """
-    # Sort by timestamp
-    sorted_media = sorted(
-        media_assets,
-        key=lambda x: x.metadata.get('capture_time', x.upload_timestamp)
-    )
-    
-    clusters = []
-    current_cluster = [sorted_media[0]]
-    
-    for i in range(1, len(sorted_media)):
-        prev_time = sorted_media[i-1].metadata.get('capture_time')
-        curr_time = sorted_media[i].metadata.get('capture_time')
-        
-        if (curr_time - prev_time).seconds > cluster_threshold:
-            clusters.append(current_cluster)
-            current_cluster = [sorted_media[i]]
-        else:
-            current_cluster.append(sorted_media[i])
-    
-    clusters.append(current_cluster)
-    return clusters
-```
+#### CompositionAgent Edit Planning Process
 
-#### Rhythmic Pacing Algorithm
+The system uses **Gemini AI** for intelligent edit planning instead of algorithmic approaches:
+
 ```python
-def generate_timeline_segments(
-    media_pool: List[MediaAsset],
-    music_profile: AudioAnalysisProfile,
-    target_duration: int
-) -> List[TimelineSegment]:
-    """
-    Creates timeline synchronized to music rhythm.
-    """
-    segments = []
-    current_time = 0.0
-    beat_index = 0
+class EditPlanner:
+    """AI-powered edit planning using Gemini LLM."""
     
-    # Calculate average clip duration based on tempo
-    base_clip_duration = 60.0 / music_profile.tempo_bpm * 4  # 4 beats
-    
-    while current_time < target_duration and beat_index < len(music_profile.beat_timestamps):
-        # Get current energy level
-        energy_index = int(current_time / music_profile.duration * len(music_profile.energy_curve))
-        current_energy = music_profile.energy_curve[min(energy_index, len(music_profile.energy_curve)-1)]
+    async def plan_edit(
+        self,
+        media_assets: List[MediaAsset],
+        music_profile: Optional[AudioAnalysisProfile],
+        target_duration: int,
+        user_prompt: str,
+        style_preferences: Dict[str, Any]
+    ) -> EditPlan:
+        """
+        Generate comprehensive edit plan using AI.
         
-        # Adjust clip duration based on energy
-        duration_multiplier = 1.5 - current_energy  # High energy = shorter clips
-        clip_duration = base_clip_duration * duration_multiplier
-        
-        # Select media based on score
-        selected_media = select_best_media(media_pool, current_energy)
-        
-        # Create segment
-        segment = TimelineSegment(
-            media_asset_id=selected_media.id,
-            start_time=current_time,
-            end_time=current_time + clip_duration,
-            duration=clip_duration,
-            in_point=0.0,
-            out_point=clip_duration if selected_media.type == "video" else None
+        The AI considers:
+        - Media content quality and relevance
+        - Musical structure (intro/verse/chorus)
+        - User creative intent from prompt
+        - Storytelling principles and pacing
+        """
+        # Build context for AI planning
+        context = self._build_planning_context(
+            media_assets, music_profile, user_prompt
         )
         
-        segments.append(segment)
-        current_time += clip_duration
+        # AI generates structured edit plan
+        plan = await self._generate_edit_plan_with_ai(context)
         
-        # Advance to next beat marker
-        while beat_index < len(music_profile.beat_timestamps) and \
-              music_profile.beat_timestamps[beat_index] < current_time:
-            beat_index += 1
-    
-    return segments
+        # Validate and adjust plan
+        validated_plan = self._validate_and_adjust_plan(plan, media_assets)
+        
+        return validated_plan
 ```
 
-### 2.5 AI-Powered Edit Planning
-
-The system now uses Gemini LLM to create intelligent edit plans before composition, enabling:
-- Story-driven sequencing based on content understanding
-- Musical structure awareness (intro/verse/chorus alignment)
-- Energy-based pacing that matches visual content to audio dynamics
-- Smooth transitions selected based on context
-
-#### Edit Plan Models
+#### Beat Synchronization System
 ```python
-class PlannedSegment(BaseModel):
-    """AI-planned segment with reasoning"""
-    media_id: str
-    start_time: float
-    duration: float
-    trim_start: float = 0.0
-    trim_end: Optional[float] = None
-    transition_type: str
-    reasoning: str  # Why this clip was chosen
-    story_beat: str  # e.g., "introduction", "climax"
-    energy_match: float  # How well it matches music energy
-
-class EditPlan(BaseModel):
-    """Complete edit plan created by AI"""
-    segments: List[PlannedSegment]
-    total_duration: float
-    narrative_structure: str
-    pacing_strategy: str
-    music_sync_notes: str
-    variety_score: float
-    story_coherence: float
-    technical_quality: float
-    reasoning_summary: str
+class BeatSynchronizer:
+    """Synchronizes video cuts to music beats."""
+    
+    def synchronize_timeline_to_music(
+        self,
+        edit_plan: EditPlan,
+        music_profile: AudioAnalysisProfile
+    ) -> Timeline:
+        """Create beat-synchronized timeline from AI edit plan."""
+        # Map edit plan segments to musical structure
+        segment_mapping = self._map_segments_to_music_structure(
+            edit_plan.selected_segments,
+            music_profile.musical_segments
+        )
+        
+        # Align cuts to beat grid
+        beat_aligned_timeline = self._align_cuts_to_beats(
+            segment_mapping,
+            music_profile.beats
+        )
+        
+        return beat_aligned_timeline
 ```
 
-#### Two-Phase Composition Process
-1. **Planning Phase**: AI analyzes all media and music to create a detailed edit plan
-2. **Execution Phase**: Convert the plan into a timeline with precise timing
+#### Key Advantages of AI-Powered Approach
 
-This approach ensures videos have both technical precision (beat sync, smooth transitions) and creative coherence (story flow, emotional arc).
+1. **Contextual Understanding**: AI considers the actual content of media, not just timestamps
+2. **Creative Intelligence**: Can understand user intent and apply cinematic principles  
+3. **Musical Awareness**: Maps video content to musical structure (verse, chorus, etc.)
+4. **Story Structure**: Creates narrative arcs with introduction, development, and resolution
+5. **Adaptive Planning**: Adjusts to different content types and user preferences
 
 ### 2.6 Storage Architecture
 
@@ -672,14 +622,15 @@ class FilesystemStorage(StorageInterface):
         
         return str(target_path)
 
-class S3Storage(StorageInterface):
-    """S3-compatible storage (future implementation)"""
+class SupabaseStorage(StorageInterface):
+    """Supabase storage implementation for production deployment"""
     
-    def __init__(self, bucket: str, prefix: str = ""):
+    def __init__(self, url: str, key: str, bucket: str = "user-media"):
+        self.url = url
+        self.key = key
         self.bucket = bucket
-        self.prefix = prefix
     
-    # Implementation for S3 operations
+    # Implementation for Supabase storage operations
 ```
 
 ## 3. API Design

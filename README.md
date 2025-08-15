@@ -332,8 +332,8 @@ flake8 src/ tests/
 - **`isort==5.13.2`**: Import statement organizer
 
 ### Optional Dependencies
-- **`monitoring`**: OpenTelemetry integration for production monitoring
-- **`boto3==1.40.1`**: AWS SDK for future S3 storage support
+- **`agentops`**: AgentOps integration for ADK agent monitoring and analytics
+- **`newrelic`**: New Relic integration for production monitoring (future)
 
 ## Documentation
 

@@ -173,9 +173,9 @@ CREATE TABLE processing_jobs (
 );
 ```
 
-**Supabase Storage Buckets**
+**Supabase Storage Configuration**
 ```typescript
-// Storage bucket configuration
+// Supabase storage buckets
 const storageBuckets = {
   'user-media': {
     public: false,
@@ -872,25 +872,31 @@ cd backend
 
 **Storage Configuration**:
 ```bash
-# Set up Supabase storage buckets
+# Option 1: Supabase Storage
 supabase storage create user-media --public false
 supabase storage create rendered-videos --public true
 supabase storage create project-thumbnails --public true
+
+# Option 2: AWS S3 Setup
+aws s3 mb s3://memory-movies-user-media
+aws s3 mb s3://memory-movies-rendered-videos  
+aws s3 mb s3://memory-movies-thumbnails
+# Configure CORS and bucket policies as needed
 ```
 
 **Python Integration**:
 ```python
-# Backend services integration
-- supabase_client.py     # Database operations
-- storage_service.py     # File storage operations  
-- auth_service.py        # User authentication
-- realtime_service.py    # Real-time subscriptions
+# Backend services integration (flexible storage)
+- database_client.py     # Database operations (Supabase or PostgreSQL)
+- storage_service.py     # File storage (Supabase Storage or S3)
+- auth_service.py        # User authentication  
+- config_service.py      # Environment-based configuration
 ```
 
 **Deliverables**:
 - Complete database schema with migrations
-- File storage integration for media assets
-- Real-time database subscriptions
+- File storage integration (Supabase Storage or S3)
+- User authentication system
 - Row-level security policies implemented
 
 ### Phase 2: Frontend Development (6-8 weeks)
