@@ -15,9 +15,14 @@ memory-movie-maker/
 ├── Makefile                        # Common development tasks
 │
 ├── docs/                           # Project documentation
-│   ├── PRD.md                     # Product Requirements Document
 │   ├── TDD.md                     # Technical Design Document (this file)
-│   └── roadmap.md                 # Development roadmap and task tracking
+│   ├── roadmap.md                 # Development roadmap and task tracking
+│   ├── ROOT_AGENT_GUIDE.md        # RootAgent workflow documentation
+│   ├── API_REFERENCE.md           # Comprehensive API documentation
+│   ├── AGENT_ARCHITECTURE.md      # Multi-agent system architecture
+│   └── adr/                       # Architecture Decision Records
+│       ├── 001-use-google-adk.md
+│       └── 002-data-model-design.md
 │
 ├── src/                            # Source code
 │   ├── __init__.py
@@ -39,7 +44,7 @@ memory-movie-maker/
 │   │   ├── tools/                 # Agent tools
 │   │   │   ├── __init__.py
 │   │   │   ├── visual_analysis.py # Gemini visual analysis
-│   │   │   ├── audio_analysis.py  # Essentia audio analysis
+│   │   │   ├── audio_analysis.py  # Librosa audio analysis
 │   │   │   ├── video_rendering.py # MoviePy rendering
 │   │   │   ├── critique.py        # Video critique tool
 │   │   │   ├── nlp_parser.py      # Natural language parsing

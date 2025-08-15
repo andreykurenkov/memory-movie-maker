@@ -104,7 +104,7 @@ asyncio.run(create_video())
 
 ## Architecture
 
-Memory Movie Maker uses a multi-agent architecture with a self-correction loop:
+Memory Movie Maker uses a **multi-agent architecture** powered by Google's Agent Development Kit (ADK) with a self-correction loop:
 
 ```
 User Input → RootAgent → AnalysisAgent → CompositionAgent → EvaluationAgent
@@ -112,24 +112,81 @@ User Input → RootAgent → AnalysisAgent → CompositionAgent → EvaluationAg
                               ←──── RefinementAgent ←────────────────
 ```
 
-### Agents
+### Core Technologies
 
-- **RootAgent**: Orchestrates the workflow sequentially (no LLM decision-making needed)
-- **AnalysisAgent**: Analyzes media files using:
-  - Gemini for visual understanding (native video analysis)
-  - Librosa for technical audio features (beats, tempo, energy)
-  - Gemini for semantic audio analysis (speech, emotions)
-- **CompositionAgent**: Uses AI to plan edits, then creates beat-synced timelines and renders videos
-- **EvaluationAgent**: Scores videos (1-10) and suggests specific improvements
-- **RefinementAgent**: Parses feedback into actionable edit commands
+- **Google ADK**: Multi-agent orchestration framework
+- **Gemini API**: Advanced AI for visual analysis and edit planning
+- **Librosa**: Professional audio analysis (beats, tempo, musical structure)
+- **MoviePy**: Video rendering and effects engine
+- **Gradio**: Modern web interface framework
+
+### Agents & Responsibilities
+
+#### 🎯 **RootAgent** (`root_agent.py`)
+- **Role**: Workflow orchestrator and user interface
+- **Functions**: Manages agent lifecycle, handles user interactions, coordinates data flow
+- **No LLM**: Uses deterministic logic for reliable orchestration
+
+#### 🔍 **AnalysisAgent** (`analysis_agent.py`)
+- **Role**: Media content understanding
+- **Tools**:
+  - **Visual Analysis**: Gemini extracts content descriptions, quality scores, notable segments
+  - **Audio Technical**: Librosa detects beats, tempo, energy curves, musical structure (intro/verse/chorus)
+  - **Audio Semantic**: Gemini provides speech transcription, emotional tone, sound effect detection
+- **Output**: Rich media metadata for intelligent composition
+
+#### 🎬 **CompositionAgent** (`composition_agent.py`)
+- **Role**: AI-powered video creation
+- **Process**:
+  1. **Edit Planning**: Gemini creates story structure with pacing and transitions
+  2. **Timeline Building**: Maps media to beats with precise timing
+  3. **Video Rendering**: Uses MoviePy for effects, transitions, and final export
+- **Key Feature**: Beat-synchronized cuts for professional-quality rhythm matching
+
+#### 📊 **EvaluationAgent** (`evaluation_agent.py`)
+- **Role**: Quality assessment and improvement identification
+- **Functions**: 
+  - Scores videos (1-10 scale) on story, pacing, sync, and transitions
+  - Provides specific, actionable improvement suggestions
+  - Determines if additional refinement is needed (target: ≥7.0 score)
+
+#### 🔧 **RefinementAgent** (`refinement_agent.py`)
+- **Role**: Feedback interpretation and edit command generation
+- **Functions**:
+  - Parses natural language feedback ("make it more upbeat", "slower pacing")
+  - Translates to specific edit parameters (tempo changes, clip selection, transitions)
+  - Applies user preferences to composition settings
 
 ### Self-Correction Loop
 
-The system automatically refines videos up to 3 times:
-1. Create initial video
-2. Evaluate quality (target: 7.0+ score)
-3. If needed, apply refinements and re-render
-4. Repeat until acceptable or max iterations reached
+The system autonomously improves videos through **iterative refinement**:
+
+1. **Initial Creation**: CompositionAgent generates first draft
+2. **Quality Evaluation**: EvaluationAgent scores and critiques (target: 7.0+)
+3. **Intelligent Refinement**: If score < 7.0, RefinementAgent applies improvements
+4. **Re-rendering**: CompositionAgent creates improved version
+5. **Repeat**: Up to 3 iterations or until quality target achieved
+
+This ensures users receive high-quality videos without manual intervention.
+
+### Data Flow Architecture
+
+```
+Media Files → Analysis → AI Planning → Timeline → Rendering → Evaluation → Refinement
+     ↓            ↓           ↓           ↓           ↓            ↓            ↓
+  Metadata    Quality    Edit Plan   Beat-Synced   MP4 Video   Quality     Enhanced
+ Extraction    Scores     (Gemini)    Timeline     (MoviePy)   Score       Video
+```
+
+### Key Innovation: Hybrid AI Approach
+
+The system combines **three complementary AI approaches**:
+
+1. **Technical Analysis** (Librosa): Precise beat detection, tempo mapping, energy curves
+2. **Semantic Understanding** (Gemini): Content comprehension, emotional analysis, story structure  
+3. **Creative Synthesis** (Gemini): Intelligent edit planning that considers both technical and creative factors
+
+This hybrid approach enables videos that are both **technically synchronized** and **creatively compelling**.
 
 ## Troubleshooting
 
@@ -245,13 +302,46 @@ flake8 src/ tests/
 3. Make your changes with tests
 4. Submit a pull request
 
+## Library Dependencies
+
+### Core AI & Agent Framework
+- **`google-adk==1.9.0`**: Google's Agent Development Kit for multi-agent orchestration
+- **`google-genai>=1.0.0`**: New unified Google AI SDK for Gemini API access
+- **`google-cloud-aiplatform==1.106.0`**: Google Cloud AI platform integration
+
+### Audio & Video Processing
+- **`librosa==0.11.0`**: Professional audio analysis library for beat detection and musical structure
+- **`moviepy==2.2.1`**: Python video editing library for rendering and effects
+- **`opencv-python==4.12.0.88`**: Computer vision library for advanced video processing
+- **`pillow==11.3.0`**: Python Imaging Library for photo processing
+- **`numpy>=1.25.0,<2.3.0`**: Numerical computing foundation
+
+### Web Interface & API
+- **`gradio==5.39.0`**: Modern web interface framework for AI applications
+- **`fastapi==0.116.1`**: High-performance web framework for APIs
+- **`uvicorn==0.35.0`**: ASGI web server for FastAPI
+
+### Data Models & Validation
+- **`pydantic==2.11.7`**: Data validation and serialization with type hints
+- **`pydantic-settings==2.10.1`**: Settings management with Pydantic
+
+### Development Tools
+- **`pytest==8.4.1`**: Testing framework with async support
+- **`black==25.1.0`**: Code formatter for consistent Python style
+- **`mypy==1.17.1`**: Static type checker for Python
+- **`isort==5.13.2`**: Import statement organizer
+
+### Optional Dependencies
+- **`monitoring`**: OpenTelemetry integration for production monitoring
+- **`boto3==1.40.1`**: AWS SDK for future S3 storage support
+
 ## Documentation
 
-- [CLAUDE.md](CLAUDE.md) - Complete developer guide and project context
-- [Product Requirements](docs/PRD.md) - What we're building and why
-- [Technical Design](docs/TDD.md) - How it's built
-- [Development Roadmap](docs/roadmap.md) - Progress and next steps
-- [RootAgent Guide](docs/ROOT_AGENT_GUIDE.md) - Orchestration details
+- **[CLAUDE.md](CLAUDE.md)** - Complete developer guide and project context
+- **[Technical Design](docs/TDD.md)** - Architecture deep dive and implementation details
+- **[Development Roadmap](docs/roadmap.md)** - Project progress and next steps
+- **[RootAgent Guide](docs/ROOT_AGENT_GUIDE.md)** - Orchestration and workflow details
+- **[Architecture Decision Records](docs/adr/)** - Key technical decisions and rationale
 
 ## License
 

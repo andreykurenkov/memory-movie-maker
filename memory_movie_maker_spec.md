@@ -104,17 +104,16 @@ class PlannedSegment:
 
 #### Supabase Backend Integration
 
-The system uses **Supabase** as the primary backend for scalable, collaborative video editing.
+The system uses **Supabase** as the backend for user authentication and project persistence.
 
 **Database Schema (PostgreSQL)**
 ```sql
--- Users and Authentication
+-- Users and Authentication (handled by Supabase Auth)
 CREATE TABLE profiles (
   id UUID REFERENCES auth.users(id) PRIMARY KEY,
   username VARCHAR(50) UNIQUE NOT NULL,
   full_name TEXT,
   avatar_url TEXT,
-  subscription_tier VARCHAR(20) DEFAULT 'free',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -132,15 +131,6 @@ CREATE TABLE projects (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Project Collaborators
-CREATE TABLE project_collaborators (
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
-  role VARCHAR(20) DEFAULT 'viewer', -- owner, editor, viewer
-  invited_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  PRIMARY KEY (project_id, user_id)
-);
-
 -- Media Assets
 CREATE TABLE media_assets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -153,11 +143,10 @@ CREATE TABLE media_assets (
   duration FLOAT, -- for video/audio files
   metadata JSONB, -- file metadata
   analysis_data JSONB, -- AI analysis results
-  uploaded_by UUID REFERENCES profiles(id),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Project Versions (for edit history)
+-- Project Versions (for edit history and iterations)
 CREATE TABLE project_versions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
@@ -166,22 +155,10 @@ CREATE TABLE project_versions (
   edit_plan JSONB, -- AI-generated edit plan
   render_settings JSONB,
   output_file_path TEXT, -- rendered video path
-  created_by UUID REFERENCES profiles(id),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Real-time Comments
-CREATE TABLE comments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
-  content TEXT NOT NULL,
-  timestamp_ms FLOAT, -- video timestamp for the comment
-  parent_id UUID REFERENCES comments(id), -- for reply threads
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Processing Jobs
+-- Processing Jobs (for background AI processing)
 CREATE TABLE processing_jobs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
@@ -221,30 +198,28 @@ const storageBuckets = {
 
 **Row Level Security (RLS) Policies**
 ```sql
--- Users can only access their own projects and shared projects
+-- Users can only access their own projects
 CREATE POLICY "Users can view their own projects" ON projects
-  FOR SELECT USING (
-    owner_id = auth.uid() OR 
+  FOR SELECT USING (owner_id = auth.uid());
+
+CREATE POLICY "Users can update their own projects" ON projects
+  FOR UPDATE USING (owner_id = auth.uid());
+
+-- Users can only upload media to their own projects
+CREATE POLICY "Users can manage their own media" ON media_assets
+  FOR ALL USING (
     EXISTS (
-      SELECT 1 FROM project_collaborators 
-      WHERE project_id = projects.id AND user_id = auth.uid()
+      SELECT 1 FROM projects 
+      WHERE id = project_id AND owner_id = auth.uid()
     )
   );
 
--- Users can only upload media to projects they have access to
-CREATE POLICY "Users can upload to accessible projects" ON media_assets
-  FOR INSERT WITH CHECK (
+-- Users can only access their own project versions
+CREATE POLICY "Users can access their own project versions" ON project_versions
+  FOR ALL USING (
     EXISTS (
       SELECT 1 FROM projects 
-      WHERE id = project_id AND (
-        owner_id = auth.uid() OR 
-        EXISTS (
-          SELECT 1 FROM project_collaborators 
-          WHERE project_id = projects.id 
-          AND user_id = auth.uid() 
-          AND role IN ('owner', 'editor')
-        )
-      )
+      WHERE id = project_id AND owner_id = auth.uid()
     )
   );
 ```
@@ -257,13 +232,8 @@ class ProjectState:
     analysis: AnalysisResults         # All AI analysis data
     timeline: Timeline                # Current video timeline
     status: ProjectStatus             # Current processing phase
-    history: ProjectHistory           # Edit history and iterations
     output_path: str                  # Final video location
-    
-    # Collaborative features
-    collaborators: List[Collaborator] # Project team members
-    comments: List[Comment]           # Timestamp-based feedback
-    version_history: List[Version]    # Edit iterations
+    version_history: List[Version]    # Edit iterations and refinements
 ```
 
 ## Technical Implementation Details
@@ -321,8 +291,6 @@ The system uses **three complementary approaches**:
 ```python
 # Environment Variables
 GEMINI_API_KEY=your_api_key_here
-GOOGLE_CLOUD_PROJECT=your_project_id  # For Vertex AI
-GOOGLE_GENAI_USE_VERTEXAI=false      # Use direct API or Vertex
 ```
 
 ## Data Models
@@ -360,53 +328,41 @@ class VideoSegment:
 
 ### Web Application Frontend
 
-The system features a modern, responsive web application built for collaborative video creation and editing.
+The system features a clean, responsive web application focused on the core goal: creating memory movies with AI.
 
 #### Main Interface Components
 
 **Project Dashboard**
-- **Project Gallery**: Grid view of all user projects with thumbnails
+- **Project Gallery**: Grid view of user's projects with thumbnails
 - **Recent Projects**: Quick access to recently edited videos
-- **Shared Projects**: Collaborative projects shared by other users
-- **Templates**: Pre-built project templates for common scenarios
+- **Create New Project**: Simple button to start new project
 
 **Project Creation Workflow**
 1. **Media Upload**: Drag-and-drop interface for photos, videos, and music
-   - Progress indicators for large file uploads
-   - File validation and format conversion suggestions
+   - Progress indicators for file uploads
+   - File validation and format support
    - Automatic thumbnail generation
-   - Batch upload support
 
 2. **Project Configuration**
-   - **Prompt Input**: Rich text editor for describing desired video
-   - **Style Selection**: Visual style picker (energetic, nostalgic, cinematic, etc.)
-   - **Duration Settings**: Slider for target video length (15s - 10min)
+   - **Prompt Input**: Text area for describing desired video
+   - **Style Selection**: Simple dropdown (energetic, nostalgic, cinematic, etc.)
+   - **Duration Settings**: Slider for target video length (30s - 5min)
    - **Aspect Ratio**: Selection for different platforms (16:9, 9:16, 1:1)
-   - **Quality Settings**: Output resolution and compression options
 
 3. **AI Generation Interface**
-   - **Real-time Progress**: Live updates during analysis and rendering
-   - **Analysis Visualization**: Preview of detected faces, objects, and scenes
-   - **Music Sync Preview**: Waveform visualization with beat markers
-   - **Processing Queue**: Status of background tasks
+   - **Progress Updates**: Status during analysis and rendering
+   - **Preview**: Preview of generated video sections
+   - **Processing Status**: Current AI agent activity
 
 **Video Editor Interface**
-- **Timeline View**: Interactive timeline showing clips, transitions, and music
-- **Preview Player**: High-quality video preview with scrubbing controls
-- **Media Library**: Organized view of all project assets with metadata
-- **AI Suggestions**: Real-time editing recommendations from AI
-
-**Collaborative Features**
-- **Real-time Editing**: Multiple users can edit simultaneously
-- **Comment System**: Timestamp-based feedback and discussions
-- **Version History**: Track changes and revert to previous versions
-- **Share Controls**: Granular permissions for viewing/editing/downloading
+- **Preview Player**: Video player with basic controls
+- **Media Library**: List view of project assets
+- **Version History**: Access to previous iterations
 
 **Refinement Interface**
-- **Natural Language Input**: Chat-like interface for editing requests
-- **Quick Actions**: One-click buttons for common adjustments
-- **Before/After Comparison**: Side-by-side view of changes
-- **Iteration History**: Browse through different versions
+- **Natural Language Input**: Simple text input for editing requests
+- **Quick Actions**: Buttons for common adjustments ("Make it faster", "More photos", etc.)
+- **Iteration History**: Previous versions with ability to restore
 
 #### Technology Stack
 
@@ -425,7 +381,7 @@ The system features a modern, responsive web application built for collaborative
 **State Management**
 - **Zustand**: Lightweight state management for client state
 - **TanStack Query**: Server state management with caching
-- **Real-time Subscriptions**: Supabase real-time for collaborative features
+- **Supabase Client**: Direct database and auth integration
 
 #### Command Line Interface (Development)
 ```bash
@@ -473,9 +429,9 @@ async def generate_video(project_id: str, generation_request: GenerationRequest)
 async def refine_video(project_id: str, refinement_request: RefinementRequest):
     """Refine video based on user feedback"""
 
-@app.websocket("/ws/projects/{project_id}")
-async def project_websocket(websocket: WebSocket, project_id: str):
-    """Real-time project updates and collaboration"""
+@app.get("/api/projects/{project_id}/status")
+async def get_project_status(project_id: str):
+    """Get current project processing status"""
 ```
 
 #### Background Task Processing
@@ -498,38 +454,32 @@ def render_video_task(project_id: str, timeline_data: dict):
     """Render final video file"""
 ```
 
-### Real-time Features
+### Progress Tracking
 
-#### WebSocket Communication
+#### Polling-based Status Updates
 ```typescript
-// Frontend WebSocket client
-class ProjectWebSocket {
+// Frontend status polling
+class ProjectStatusTracker {
   constructor(projectId: string) {
-    this.ws = new WebSocket(`wss://api.example.com/ws/projects/${projectId}`);
+    this.projectId = projectId;
   }
   
-  // Real-time collaboration events
-  onUserJoined(callback: (user: User) => void) { /* ... */ }
-  onTimelineUpdated(callback: (timeline: Timeline) => void) { /* ... */ }
-  onCommentAdded(callback: (comment: Comment) => void) { /* ... */ }
-  onProgressUpdate(callback: (progress: Progress) => void) { /* ... */ }
+  async pollStatus(): Promise<ProjectStatus> {
+    const response = await fetch(`/api/projects/${this.projectId}/status`);
+    return await response.json();
+  }
+  
+  startPolling(callback: (status: ProjectStatus) => void) {
+    const interval = setInterval(async () => {
+      const status = await this.pollStatus();
+      callback(status);
+      
+      if (status.phase === 'completed' || status.phase === 'error') {
+        clearInterval(interval);
+      }
+    }, 2000); // Poll every 2 seconds
+  }
 }
-```
-
-#### Supabase Real-time Integration
-```typescript
-// Subscribe to database changes
-const subscription = supabase
-  .channel('project-changes')
-  .on('postgres_changes', {
-    event: 'UPDATE',
-    schema: 'public',
-    table: 'projects',
-    filter: `id=eq.${projectId}`
-  }, (payload) => {
-    // Update UI with latest project state
-  })
-  .subscribe();
 ```
 
 ## Development Setup
@@ -858,55 +808,286 @@ edit_plan = await plan_edit(
 - **User Preference Learning**: Personalized editing styles
 - **Content-aware Effects**: Intelligent application of filters and effects
 
-## Troubleshooting
+## Development Roadmap: From AI Engine to Full Web Application
 
-### Common Issues
+### Current Status: Core AI Engine Complete ✅
 
-#### API Authentication
+The multi-agent AI system is fully implemented and functional:
+- **AnalysisAgent**: Media content understanding with Gemini + Librosa
+- **CompositionAgent**: AI-powered edit planning and video rendering  
+- **EvaluationAgent**: Quality assessment and improvement suggestions
+- **RefinementAgent**: Natural language feedback interpretation
+- **RootAgent**: Workflow orchestration and state management
+
+**Validation**: Run `python scripts/test_end_to_end.py` to verify complete AI workflow.
+
+### Phase 1: Web API Development (4-6 weeks)
+
+#### 1.1 FastAPI Backend Setup
+**Status**: Not Started | **Priority**: High
+
 ```bash
-# Test Gemini API connection
-python -c "from memory_movie_maker.config import settings; print(settings.validate_api_keys())"
+# Implementation tasks:
+mkdir backend
+cd backend
 
-# Test Supabase connection
-curl -H "Authorization: Bearer YOUR_SUPABASE_ANON_KEY" \
-     -H "apikey: YOUR_SUPABASE_ANON_KEY" \
-     "https://your-project.supabase.co/rest/v1/projects"
+# Core API structure
+- fastapi_app/
+  ├── main.py              # FastAPI application
+  ├── api/
+  │   ├── routes/          # API endpoints
+  │   ├── models/          # Request/response models
+  │   └── middleware/      # CORS, auth, logging
+  ├── services/
+  │   ├── agent_service.py # AI agent integration
+  │   ├── file_service.py  # Media upload handling
+  │   └── project_service.py # Project management
+  └── dependencies.py      # Dependency injection
 ```
 
-#### FFmpeg Installation
-```bash
-# Verify FFmpeg is available
-ffmpeg -version
+**Key Implementation Steps**:
+1. **Project API endpoints**: Create, list, update, delete projects
+2. **Media upload handling**: Multipart file upload with validation
+3. **AI processing endpoints**: Trigger agent workflows via background tasks
+4. **Status polling**: Progress tracking endpoints
+5. **Error handling**: Comprehensive error responses and logging
 
-# macOS installation
-brew install ffmpeg
+**Deliverables**:
+- RESTful API with OpenAPI documentation
+- Background task processing with Redis
+- File upload and storage integration
+- Authentication middleware for Supabase integration
 
-# Ubuntu installation
-sudo apt update && sudo apt install ffmpeg
+#### 1.2 Supabase Integration
+**Status**: Not Started | **Priority**: High
+
+**Database Schema Implementation**:
+```sql
+-- Execute these migrations in Supabase
+-- 1. Core tables (projects, media_assets, project_versions)
+-- 2. Collaboration tables (project_collaborators, comments)
+-- 3. Processing tables (processing_jobs)
+-- 4. RLS policies for data security
 ```
 
-#### Memory Issues
+**Storage Configuration**:
 ```bash
-# Monitor memory usage during processing
-python scripts/create_memory_movie.py --debug --verbose <files>
+# Set up Supabase storage buckets
+supabase storage create user-media --public false
+supabase storage create rendered-videos --public true
+supabase storage create project-thumbnails --public true
 ```
 
-#### Performance Optimization
-```bash
-# Reduce concurrent analysis tasks
-export ANALYSIS_BATCH_SIZE=5
-
-# Enable result caching
-export ANALYSIS_CACHE_ENABLED=true
+**Python Integration**:
+```python
+# Backend services integration
+- supabase_client.py     # Database operations
+- storage_service.py     # File storage operations  
+- auth_service.py        # User authentication
+- realtime_service.py    # Real-time subscriptions
 ```
 
-#### Database Issues
-```bash
-# Reset Supabase local database
-supabase db reset
+**Deliverables**:
+- Complete database schema with migrations
+- File storage integration for media assets
+- Real-time database subscriptions
+- Row-level security policies implemented
 
-# Check connection status
-supabase status
+### Phase 2: Frontend Development (6-8 weeks)
+
+#### 2.1 Next.js Application Setup
+**Status**: Not Started | **Priority**: High
+
+```bash
+# Create Next.js frontend
+npx create-next-app@latest frontend --typescript --tailwind --app
+
+# Core frontend structure
+frontend/
+├── app/                 # App Router (Next.js 13+)
+│   ├── (auth)/         # Authentication pages
+│   ├── (dashboard)/    # Main application
+│   └── api/            # API routes
+├── components/
+│   ├── ui/             # Reusable UI components
+│   ├── project/        # Project-specific components
+│   ├── editor/         # Video editor components
+│   └── upload/         # File upload components
+├── lib/
+│   ├── supabase.ts     # Supabase client
+│   ├── api.ts          # API client
+│   └── stores/         # State management
+└── types/              # TypeScript type definitions
 ```
 
-This specification provides a complete technical reference for implementing Memory Movie Maker as a modern web application with collaborative features, persistent storage, and real-time capabilities using Supabase as the backend infrastructure.
+**Key Components to Build**:
+1. **Authentication system** with Supabase Auth
+2. **Project dashboard** with grid layout
+3. **File upload interface** with drag-and-drop and progress
+4. **Video preview interface** with player controls
+5. **Refinement interface** for AI feedback
+
+#### 2.2 Core UI Components
+**Status**: Not Started | **Priority**: Medium
+
+**Project Dashboard**:
+```typescript
+// Key components to implement
+- ProjectCard           # Project thumbnail and metadata
+- ProjectGrid          # Responsive project gallery
+- CreateProjectModal   # New project creation flow
+- FilterSidebar        # Project filtering and search
+- ShareDialog          # Project sharing controls
+```
+
+**Video Preview Interface**:
+```typescript
+// Preview components
+- VideoPlayer          # Video player with basic controls
+- MediaLibrary         # Asset browser with thumbnails
+- VersionHistory       # Previous iterations
+- ExportSettings       # Download options
+```
+
+**File Upload System**:
+```typescript
+// Upload components  
+- DropZone             # Drag-and-drop file upload
+- UploadProgress       # Progress indicators and queues
+- FilePreview          # Media thumbnails and validation
+- BatchUpload          # Multiple file handling
+```
+
+### Phase 3: Integration & Polish (4-6 weeks)
+
+#### 3.1 AI Agent Integration
+**Status**: Not Started | **Priority**: High
+
+**Backend Service Layer**:
+```python
+# services/agent_service.py
+class AgentService:
+    async def analyze_media(self, project_id: str) -> AnalysisResult
+    async def generate_video(self, project_id: str, prompt: str) -> GenerationResult  
+    async def refine_video(self, project_id: str, feedback: str) -> RefinementResult
+    async def get_processing_status(self, job_id: str) -> ProcessingStatus
+```
+
+**Frontend Integration**:
+```typescript
+// lib/agents.ts
+export class AgentAPI {
+  async startAnalysis(projectId: string): Promise<JobStatus>
+  async generateVideo(projectId: string, prompt: string): Promise<JobStatus>
+  async refineVideo(projectId: string, feedback: string): Promise<JobStatus>
+  async subscribeToProgress(jobId: string, callback: ProgressCallback): void
+}
+```
+
+#### 3.2 Polish & Optimization
+**Status**: Not Started | **Priority**: Medium
+
+**Performance Optimizations**:
+- Component lazy loading for faster initial load
+- Image optimization for thumbnails and previews
+- Efficient video preview generation
+- Background task status caching
+
+**User Experience Improvements**:
+- Loading states and skeleton screens
+- Error handling with user-friendly messages
+- Mobile-responsive design
+- Keyboard shortcuts for common actions
+
+### Phase 4: Production Deployment (2-3 weeks)
+
+#### 4.1 Infrastructure Setup
+**Status**: Not Started | **Priority**: Medium
+
+**Frontend Deployment (Vercel)**:
+```bash
+# Automated deployment pipeline
+- GitHub integration for continuous deployment
+- Environment variable configuration
+- Custom domain setup with SSL
+- Performance monitoring and analytics
+```
+
+**Backend Deployment (Railway/Render)**:
+```bash
+# Production API deployment
+- Docker containerization
+- Environment configuration management
+- Health checks and monitoring
+- Auto-scaling configuration
+- Background worker deployment
+```
+
+**Background Processing**:
+```bash
+# Celery worker deployment
+- Redis cluster setup for task queuing
+- Dedicated worker instances for video processing
+- Job monitoring and failure recovery
+- Scaling policies based on queue depth
+```
+
+#### 4.2 Performance Optimization
+**Status**: Not Started | **Priority**: Medium
+
+**Backend Optimizations**:
+- Database connection pooling and query optimization
+- Redis caching for frequently accessed data
+- File upload optimization with chunked transfers
+- Background task prioritization and resource allocation
+
+**Frontend Optimizations**:
+- Component lazy loading and code splitting
+- Image optimization and responsive loading  
+- Error boundaries for graceful error handling
+- Basic caching for improved performance
+
+### Implementation Timeline
+
+```
+Week 1-2:   FastAPI backend setup + basic endpoints
+Week 3-4:   Supabase integration + database schema
+Week 5-6:   AI agent service integration + background tasks
+Week 7-8:   Next.js frontend setup + authentication
+Week 9-10:  Project dashboard + file upload system
+Week 11-12: Video preview interface + refinement
+Week 13-14: Polish and optimization features
+Week 15-16: AI integration + status polling
+Week 17-18: Production deployment + optimization
+Week 19-20: Testing, bug fixes, and final polish
+```
+
+### Success Metrics
+
+**Technical Milestones**:
+- [ ] Complete API documentation with 100% endpoint coverage
+- [ ] Real-time collaboration with <100ms latency
+- [ ] File upload handling for files up to 500MB
+- [ ] Video processing queue with auto-scaling
+- [ ] 99.9% uptime with comprehensive monitoring
+
+**User Experience Goals**:
+- [ ] Project creation to first video: <5 minutes
+- [ ] Simple refinement with natural language feedback
+- [ ] Mobile-responsive interface 
+- [ ] Intuitive UI requiring no documentation
+
+### Risk Mitigation
+
+**Technical Risks**:
+- **Video processing performance**: Implement efficient processing and reasonable limits
+- **File storage costs**: Optimize compression and implement retention policies
+- **User growth**: Design for gradual scaling without over-engineering
+- **AI API rate limits**: Implement intelligent queuing and retry logic
+
+**Business Risks**:
+- **User adoption**: Focus on intuitive UX and core value proposition
+- **Infrastructure costs**: Start simple and scale based on actual usage
+- **Complexity creep**: Maintain MVP focus and resist feature bloat
+
+This roadmap transforms the current AI engine into a polished web application focused on the core goal: helping users create memory movies with AI assistance. The approach prioritizes essential features over advanced collaboration tools.
