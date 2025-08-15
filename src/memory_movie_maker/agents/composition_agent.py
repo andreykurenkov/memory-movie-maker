@@ -108,7 +108,8 @@ class CompositionAgent(Agent):
             
             # Step 1: Create AI edit plan
             log_update(logger, "Creating AI edit plan...")
-            plan_result = await plan_edit_tool.run(
+            from ..tools.edit_planner import plan_edit
+            plan_result = await plan_edit(
                 project_state=project_state.model_dump(),
                 target_duration=target_duration,
                 style=style
@@ -122,7 +123,8 @@ class CompositionAgent(Agent):
             
             # Step 2: Execute the edit plan into a timeline
             log_update(logger, "Executing edit plan into timeline...")
-            timeline_result = await compose_timeline_tool.run(
+            from ..tools.composition import compose_timeline
+            timeline_result = await compose_timeline(
                 project_state=project_state.model_dump(),
                 edit_plan=plan_result["edit_plan"],
                 target_duration=target_duration,
@@ -141,7 +143,8 @@ class CompositionAgent(Agent):
             
             # Render video
             log_update(logger, f"Rendering {'preview' if preview_only else 'final'} video...")
-            render_result = await render_video_tool.run(
+            from ..tools.video_renderer import render_video
+            render_result = await render_video(
                 project_state=project_state.model_dump(),
                 output_filename=output_name,
                 resolution="640x360" if preview_only else "1920x1080",
@@ -155,8 +158,8 @@ class CompositionAgent(Agent):
             project_state = ProjectState(**render_result["updated_state"])
             
             # Update project phase
-            if project_state.project_status.phase == "composing":
-                project_state.project_status.phase = "evaluating"
+            if project_state.status.phase == "composing":
+                project_state.status.phase = "evaluating"
             
             log_complete(logger, f"Video rendered successfully: {render_result['output_path']}")
             

@@ -255,7 +255,7 @@ class RefinementAgent(Agent):
             target_duration = parameters["duration"]
             if abs(current_duration - target_duration) > 10:
                 suggestions.append(
-                    f"Large duration change ({current_duration:.0f}s ’ {target_duration}s)"
+                    f"Large duration change ({current_duration:.0f}s ' {target_duration}s)"
                 )
         
         return suggestions

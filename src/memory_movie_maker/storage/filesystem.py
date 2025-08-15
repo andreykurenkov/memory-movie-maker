@@ -98,8 +98,8 @@ class FilesystemStorage(StorageInterface):
             content.seek(0)
             file_content = content.read()
             
-            # Validate file type
-            if not validate_file_type(file_path, file_content[:8192]):
+            # Validate file type (skip for internal files)
+            if not file_path.endswith('.json') and not validate_file_type(file_path, file_content[:8192]):
                 raise StorageError(f"File type not allowed: {file_path}")
             
             # Validate file size
@@ -444,3 +444,49 @@ class FilesystemStorage(StorageInterface):
                 total_size += stat.st_size
         
         return total_size
+    
+    async def save_project(self, project_id: str, project_data: dict) -> str:
+        """Save project state to storage.
+        
+        Args:
+            project_id: Project identifier
+            project_data: Project state data as dict
+            
+        Returns:
+            Storage path of saved project
+            
+        Raises:
+            StorageError: If save fails
+        """
+        import json
+        
+        class DateTimeEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, datetime):
+                    return obj.isoformat()
+                return super().default(obj)
+        
+        project_path = f"projects/{project_id}/state.json"
+        content = BytesIO(json.dumps(project_data, indent=2, cls=DateTimeEncoder).encode('utf-8'))
+        
+        return await self.upload(project_path, content)
+    
+    async def load_project(self, project_id: str) -> dict:
+        """Load project state from storage.
+        
+        Args:
+            project_id: Project identifier
+            
+        Returns:
+            Project state data as dict
+            
+        Raises:
+            FileNotFoundError: If project doesn't exist
+            StorageError: If load fails
+        """
+        import json
+        
+        project_path = f"projects/{project_id}/state.json"
+        content = await self.download(project_path)
+        
+        return json.loads(content.read().decode('utf-8'))

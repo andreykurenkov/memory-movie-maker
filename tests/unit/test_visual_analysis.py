@@ -51,14 +51,14 @@ class TestVisualAnalysisTool:
     @patch('memory_movie_maker.tools.visual_analysis.genai')
     def test_initialization_with_genai(self, mock_genai, mock_settings):
         """Test initialization with direct Gemini API."""
-        mock_model = Mock()
-        mock_genai.GenerativeModel.return_value = mock_model
+        mock_client = Mock()
+        mock_genai.Client.return_value = mock_client
         
         tool = VisualAnalysisTool()
         
-        mock_genai.configure.assert_called_once_with(api_key="test-api-key")
-        mock_genai.GenerativeModel.assert_called_once_with("gemini-2.0-flash")
-        assert tool._model == mock_model
+        mock_genai.Client.assert_called_once_with(api_key="test-api-key")
+        assert tool._client == mock_client
+        assert tool._model_name == "gemini-2.0-flash"
         assert tool._api_type == "genai"
     
     @patch('memory_movie_maker.tools.visual_analysis.VERTEX_AI_AVAILABLE', True)

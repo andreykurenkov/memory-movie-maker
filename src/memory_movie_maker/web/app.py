@@ -363,20 +363,20 @@ class MemoryMovieMakerApp:
             if eval_results.get('strengths'):
                 eval_text.append(" Strengths:")
                 for strength in eval_results['strengths']:
-                    eval_text.append(f"  " {strength}")
+                    eval_text.append(f"  • {strength}")
                 eval_text.append("")
             
             if eval_results.get('weaknesses'):
-                eval_text.append("� Issues:")
+                eval_text.append("❌ Issues:")
                 for weakness in eval_results['weaknesses']:
-                    eval_text.append(f"  " {weakness}")
+                    eval_text.append(f"  • {weakness}")
                 eval_text.append("")
             
             if eval_results.get('specific_edits'):
-                eval_text.append("=' Suggested Edits:")
+                eval_text.append("✏️ Suggested Edits:")
                 for edit in eval_results['specific_edits'][:5]:
-                    eval_text.append(f"  " [{edit['timestamp']}] {edit['issue']}")
-                    eval_text.append(f"    � {edit['suggestion']}")
+                    eval_text.append(f"  • [{edit['timestamp']}] {edit['issue']}")
+                    eval_text.append(f"    → {edit['suggestion']}")
             
             return current_video_path, "\n".join(eval_text)
         else:

@@ -1,22 +1,28 @@
-"""Integration tests for visual analysis with real Gemini API."""
+"""Integration tests for visual analysis workflow with Gemini."""
 
 import os
 import pytest
+import asyncio
 from pathlib import Path
+from unittest.mock import Mock, patch, AsyncMock
+import json
+import base64
 
 from memory_movie_maker.tools.visual_analysis import VisualAnalysisTool
-from memory_movie_maker.models.media_asset import GeminiAnalysis
+from memory_movie_maker.models.media_asset import (
+    MediaAsset, MediaType, GeminiAnalysis, VideoSegment
+)
 
 
-# Skip these tests if no API key is configured
-pytestmark = pytest.mark.skipif(
+# Skip real API tests if no key is configured
+real_api_skip = pytest.mark.skipif(
     not os.getenv("GEMINI_API_KEY"),
     reason="GEMINI_API_KEY not set"
 )
 
 
 class TestVisualAnalysisIntegration:
-    """Integration tests that use real Gemini API."""
+    """Integration tests for visual analysis with mocked and real Gemini API."""
     
     @pytest.fixture
     def test_videos_dir(self):

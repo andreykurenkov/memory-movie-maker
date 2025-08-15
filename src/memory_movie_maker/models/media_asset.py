@@ -22,15 +22,42 @@ class VideoSegment(BaseModel):
     """Notable segment or event within a video."""
     start_time: float = Field(..., ge=0, description="Start time in seconds")
     end_time: float = Field(..., ge=0, description="End time in seconds")
-    description: str = Field(..., description="What happens in this segment")
+    description: str = Field(..., description="Complete description of segment")
     importance: float = Field(..., ge=0, le=1, description="Importance score for timeline inclusion")
-    tags: List[str] = Field(default_factory=list, description="Event tags (action, emotion, transition)")
+    tags: List[str] = Field(default_factory=list, description="Segment tags")
+    
+    # Detailed content breakdown
+    visual_content: Optional[str] = Field(None, description="What is shown visually")
+    audio_content: Optional[str] = Field(None, description="What is heard")
+    audio_type: Optional[str] = Field(None, description="Type: speech/music/sfx/ambient/mixed/silence")
+    
+    # Speech-specific fields (if applicable)
+    speaker: Optional[str] = Field(None, description="Speaker identifier if speech present")
+    speech_content: Optional[str] = Field(None, description="Transcription or summary of speech")
+    
+    # Music-specific fields (if applicable)
+    music_description: Optional[str] = Field(None, description="Music genre, mood, tempo if present")
+    
+    # Editing guidance
+    emotional_tone: Optional[str] = Field(None, description="Emotional tone: happy/sad/exciting/calm/tense/neutral")
+    sync_priority: Optional[float] = Field(None, ge=0, le=1, description="Audio-visual sync importance")
+    recommended_action: Optional[str] = Field(None, description="Editing recommendation: cut_here/hold/transition/sync_to_beat")
     
     @validator('end_time')
     def validate_times(cls, v, values):
         if 'start_time' in values and v <= values['start_time']:
             raise ValueError('End time must be after start time')
         return v
+
+
+class AudioSummary(BaseModel):
+    """Summary of audio content in a video."""
+    has_speech: bool = Field(False, description="Whether video contains speech")
+    has_music: bool = Field(False, description="Whether video contains music")
+    dominant_audio: Optional[str] = Field(None, description="Main audio type: speech/music/sfx/ambient")
+    overall_audio_mood: Optional[str] = Field(None, description="Overall audio atmosphere")
+    audio_quality: str = Field("clear", description="Audio quality: clear/muffled/noisy/distorted")
+    key_audio_moments: List[str] = Field(default_factory=list, description="Notable audio events with timestamps")
 
 
 class GeminiAnalysis(BaseModel):
@@ -45,6 +72,9 @@ class GeminiAnalysis(BaseModel):
     notable_segments: List[VideoSegment] = Field(default_factory=list, description="Notable video segments")
     overall_motion: Optional[str] = Field(None, description="Overall motion characterization")
     scene_changes: List[float] = Field(default_factory=list, description="Timestamps of major scene changes")
+    
+    # Audio summary for videos
+    audio_summary: Optional[AudioSummary] = Field(None, description="Summary of audio content in video")
 
 
 class AudioVibe(BaseModel):

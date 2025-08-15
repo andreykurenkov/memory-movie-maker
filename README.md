@@ -10,7 +10,8 @@ Memory Movie Maker leverages Google's Agent Development Kit (ADK) and advanced A
 
 - 🎬 **Automated Video Creation**: Upload photos/videos and music, get a professionally edited video
 - 🤖 **Multi-Agent AI System**: Specialized agents for analysis, composition, evaluation, and refinement
-- 🎵 **Music Synchronization**: Automatic beat detection and rhythmic video pacing
+- 🧠 **AI-Powered Edit Planning**: Gemini creates intelligent edit plans with story structure and pacing
+- 🎵 **Advanced Music Synchronization**: Detects musical structure (intro/verse/chorus) and syncs cuts to beats
 - 💬 **Natural Language Control**: Refine videos with simple commands like "make it more upbeat"
 - 🔄 **Self-Improving**: AI autonomously reviews and improves videos before showing them
 - 🌐 **Web Interface**: Simple drag-and-drop interface built with Gradio
@@ -118,7 +119,7 @@ User Input → RootAgent → AnalysisAgent → CompositionAgent → EvaluationAg
   - Gemini for visual understanding (native video analysis)
   - Librosa for technical audio features (beats, tempo, energy)
   - Gemini for semantic audio analysis (speech, emotions)
-- **CompositionAgent**: Creates beat-synced timelines and renders videos
+- **CompositionAgent**: Uses AI to plan edits, then creates beat-synced timelines and renders videos
 - **EvaluationAgent**: Scores videos (1-10) and suggests specific improvements
 - **RefinementAgent**: Parses feedback into actionable edit commands
 

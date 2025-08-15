@@ -42,7 +42,9 @@ memory-movie-maker/
 │   │   │   ├── audio_analysis.py  # Essentia audio analysis
 │   │   │   ├── video_rendering.py # MoviePy rendering
 │   │   │   ├── critique.py        # Video critique tool
-│   │   │   └── nlp_parser.py      # Natural language parsing
+│   │   │   ├── nlp_parser.py      # Natural language parsing
+│   │   │   ├── semantic_audio_analysis.py # Gemini audio understanding
+│   │   │   └── edit_planner.py    # AI-powered edit planning
 │   │   │
 │   │   ├── models/                # Data models
 │   │   │   ├── __init__.py
@@ -57,14 +59,7 @@ memory-movie-maker/
 │   │   │   ├── filesystem.py      # Local filesystem implementation
 │   │   │   ├── s3.py             # S3 storage (future)
 │   │   │   └── utils.py          # Storage utilities
-│   │   │
-│   │   ├── algorithms/            # Core algorithms
-│   │   │   ├── __init__.py
-│   │   │   ├── clustering.py      # Media clustering algorithms
-│   │   │   ├── pacing.py         # Rhythmic pacing algorithms
-│   │   │   ├── selection.py      # Clip selection algorithms
-│   │   │   └── scoring.py        # Media scoring algorithms
-│   │   │
+│   │ 
 │   │   ├── utils/                 # Utility functions
 │   │   │   ├── __init__.py
 │   │   │   ├── logging.py        # Structured logging setup
@@ -136,7 +131,6 @@ memory-movie-maker/
 - **`tools/`**: Reusable tools that agents can use, following ADK tool interface
 - **`models/`**: Pydantic models for type safety and validation
 - **`storage/`**: Abstract interface allows easy migration from filesystem to cloud
-- **`algorithms/`**: Core business logic separated from agent orchestration
 - **`utils/`**: Shared utilities to avoid code duplication
 - **`web/`**: All web interface code isolated for easy replacement
 
@@ -184,7 +178,7 @@ Memory Movie Maker is designed as a **Multi-Agent System (MAS)** using Google's 
 #### Agents
 1. **RootAgent**: Central orchestrator managing workflow and state
 2. **AnalysisAgent**: Media content analysis specialist
-3. **CompositionAgent**: Video timeline creation and rendering
+3. **CompositionAgent**: AI-powered edit planning and video rendering
 4. **EvaluationAgent**: Output quality assessment
 5. **RefinementAgent**: Natural language to command translation
 
@@ -280,6 +274,18 @@ class AudioVibe(BaseModel):
     energy: float = Field(..., ge=0, le=1)
     mood: str
     genre: Optional[str] = None
+
+class AudioSegment(BaseModel):
+    """Semantic audio segment with musical structure"""
+    start_time: float
+    end_time: float
+    content: str
+    type: str  # speech, music, silence, effects
+    importance: float = 0.5
+    musical_structure: Optional[str] = None  # intro, verse, chorus, etc.
+    energy_transition: Optional[str] = None  # building, peak, dropping
+    musical_elements: List[str] = []  # instruments detected
+    sync_priority: float = 0.5  # How important to sync cuts here
 
 class TimelineSegment(BaseModel):
     """Single clip in the timeline"""
@@ -574,7 +580,48 @@ def generate_timeline_segments(
     return segments
 ```
 
-### 2.5 Storage Architecture
+### 2.5 AI-Powered Edit Planning
+
+The system now uses Gemini LLM to create intelligent edit plans before composition, enabling:
+- Story-driven sequencing based on content understanding
+- Musical structure awareness (intro/verse/chorus alignment)
+- Energy-based pacing that matches visual content to audio dynamics
+- Smooth transitions selected based on context
+
+#### Edit Plan Models
+```python
+class PlannedSegment(BaseModel):
+    """AI-planned segment with reasoning"""
+    media_id: str
+    start_time: float
+    duration: float
+    trim_start: float = 0.0
+    trim_end: Optional[float] = None
+    transition_type: str
+    reasoning: str  # Why this clip was chosen
+    story_beat: str  # e.g., "introduction", "climax"
+    energy_match: float  # How well it matches music energy
+
+class EditPlan(BaseModel):
+    """Complete edit plan created by AI"""
+    segments: List[PlannedSegment]
+    total_duration: float
+    narrative_structure: str
+    pacing_strategy: str
+    music_sync_notes: str
+    variety_score: float
+    story_coherence: float
+    technical_quality: float
+    reasoning_summary: str
+```
+
+#### Two-Phase Composition Process
+1. **Planning Phase**: AI analyzes all media and music to create a detailed edit plan
+2. **Execution Phase**: Convert the plan into a timeline with precise timing
+
+This approach ensures videos have both technical precision (beat sync, smooth transitions) and creative coherence (story flow, emotional arc).
+
+### 2.6 Storage Architecture
 
 #### Storage Interface
 ```python

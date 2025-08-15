@@ -96,9 +96,11 @@ python scripts/create_memory_movie.py *.jpg \
 
 ### Phase 3: Compose
 - **CompositionAgent** creates initial video:
+  - AI-powered edit planning with Gemini
+  - Story-driven media sequencing
+  - Musical structure awareness (intro/verse/chorus)
   - Beat-synchronized timeline
-  - Intelligent media clustering
-  - Transition selection
+  - Intelligent transitions based on context
   - Preview render (640x360)
 
 ### Phase 4: Evaluate & Refine

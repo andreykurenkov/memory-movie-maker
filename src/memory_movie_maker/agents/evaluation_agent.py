@@ -122,14 +122,14 @@ class EvaluationAgent(Agent):
         if all_issues:
             summary_parts.append("\nKey Issues:")
             for issue in all_issues[:3]:  # Top 3
-                summary_parts.append(f"  " {issue}")
+                summary_parts.append(f"  • {issue}")
         
         # Top suggestions
         suggestions = evaluation.get("creative_suggestions", [])
         if suggestions:
             summary_parts.append("\nTop Suggestions:")
             for suggestion in suggestions[:2]:  # Top 2
-                summary_parts.append(f"  � {suggestion}")
+                summary_parts.append(f"  → {suggestion}")
         
         # Specific edits count
         specific_edits = evaluation.get("specific_edits", [])

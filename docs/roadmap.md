@@ -4,7 +4,7 @@
 
 This document tracks the development progress of Memory Movie Maker, including completed tasks, current work, and upcoming features.
 
-**Last Updated:** 2025-08-02
+**Last Updated:** 2025-08-03
 
 ## Project Status
 
@@ -102,6 +102,9 @@ Create web interface and finalize MVP.
   - [x] Added resolution scaling and aspect ratio handling
   - [x] Created ADK tool wrappers for both composition and rendering
   - [x] Written test script for verification
+  - [x] **NEW: Implemented AI-powered edit planning with Gemini**
+  - [x] **NEW: Added musical structure awareness (intro/verse/chorus)**
+  - [x] **NEW: Created two-phase composition (AI planning → execution)**
 
 - [x] Create CompositionAgent
   - [x] Implemented agent with composition and rendering tools
@@ -110,6 +113,8 @@ Create web interface and finalize MVP.
   - [x] Created edit command application system
   - [x] Handles reordering, duration changes, transitions, and effects
   - [x] Updates project phase automatically
+  - [x] **NEW: Agent now uses AI to plan edits before composition**
+  - [x] **NEW: Integrated semantic audio analysis for story flow**
 
 - [x] Implement EvaluationAgent with critique tool
   - [x] Created video evaluation tool using Gemini's video understanding

@@ -106,15 +106,37 @@ class EditPlanner:
                 info["tags"] = asset.gemini_analysis.tags
                 
                 if hasattr(asset.gemini_analysis, 'notable_segments') and asset.gemini_analysis.notable_segments:
-                    info["notable_moments"] = [
+                    info["notable_segments"] = [
                         {
                             "start": seg.start_time,
                             "end": seg.end_time,
                             "description": seg.description,
-                            "importance": seg.importance
+                            "visual_content": seg.visual_content,
+                            "audio_content": seg.audio_content,
+                            "audio_type": seg.audio_type,
+                            "speaker": seg.speaker,
+                            "speech_content": seg.speech_content,
+                            "music_description": seg.music_description,
+                            "emotional_tone": seg.emotional_tone,
+                            "importance": seg.importance,
+                            "sync_priority": seg.sync_priority,
+                            "recommended_action": seg.recommended_action,
+                            "tags": seg.tags
                         }
                         for seg in asset.gemini_analysis.notable_segments
                     ]
+                
+                # Include audio summary if available
+                if hasattr(asset.gemini_analysis, 'audio_summary') and asset.gemini_analysis.audio_summary:
+                    audio_summary = asset.gemini_analysis.audio_summary
+                    info["audio_summary"] = {
+                        "has_speech": audio_summary.has_speech,
+                        "has_music": audio_summary.has_music,
+                        "dominant_audio": audio_summary.dominant_audio,
+                        "overall_mood": audio_summary.overall_audio_mood,
+                        "audio_quality": audio_summary.audio_quality,
+                        "key_moments": audio_summary.key_audio_moments
+                    }
             
             if asset.audio_analysis:
                 info["audio_mood"] = asset.audio_analysis.vibe.mood
@@ -146,7 +168,7 @@ class EditPlanner:
                 "tempo": music_profile.tempo_bpm,
                 "duration": music_profile.duration,
                 "mood": music_profile.vibe.mood,
-                "energy_level": music_profile.vibe.energy_level,
+                "energy_level": music_profile.vibe.energy,
                 "beat_count": len(music_profile.beat_timestamps),
                 "energy_curve_summary": self._summarize_energy_curve(music_profile.energy_curve)
             }
@@ -224,6 +246,15 @@ CREATIVE GUIDELINES:
    - Align emotional peaks in visuals with "energy_peaks" in music
    - Cut on "recommended_cut_points" for natural flow
    - Match visual energy to "energy_transition" states (building, dropping, peak, valley)
+
+6. VIDEO AUDIO INTEGRATION:
+   - If video contains speech, preserve complete sentences/phrases when possible
+   - Use "video_audio.recommended_cuts" for natural audio break points
+   - Match emotional tone of video speech with overall mood
+   - For videos with music, consider layering or transitioning between video and background music
+   - Respect "sync_priority" in video segments for important audio-visual moments
+   - If video has dialogue, ensure important speech is not cut mid-sentence
+   - Use sound effects timing to enhance transitions (e.g., door closing as transition point)
 
 Return a complete edit plan as JSON:
 {{
@@ -324,10 +355,13 @@ REMEMBER:
                 if segment.reasoning:
                     log_update(logger, f"Segment {i+1}: {segment.reasoning[:60]}...")
             
+            # Calculate actual total duration from segments
+            actual_duration = sum(s.duration for s in segments)
+            
             # Create EditPlan
             edit_plan = EditPlan(
                 segments=segments,
-                total_duration=float(plan_data.get("total_duration", sum(s.duration for s in segments))),
+                total_duration=actual_duration,  # Use calculated duration to avoid validation errors
                 narrative_structure=plan_data.get("narrative_structure", "No structure provided"),
                 pacing_strategy=plan_data.get("pacing_strategy", "Standard pacing"),
                 music_sync_notes=plan_data.get("music_sync_notes"),

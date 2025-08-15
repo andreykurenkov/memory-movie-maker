@@ -122,7 +122,7 @@ class Timeline(BaseModel):
     """Complete video timeline structure."""
     segments: List[TimelineSegment] = Field(default_factory=list, description="Ordered list of clips")
     total_duration: float = Field(0.0, ge=0, description="Total timeline duration (seconds)")
-    render_settings: RenderSettings = Field(default_factory=RenderSettings, description="Rendering configuration")
+    render_settings: RenderSettings = Field(default_factory=lambda: RenderSettings(), description="Rendering configuration")
     
     # Audio settings
     music_track_id: Optional[str] = Field(None, description="Background music MediaAsset ID")

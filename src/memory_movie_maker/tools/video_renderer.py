@@ -10,11 +10,11 @@ from moviepy.editor import (
     VideoFileClip, ImageClip, CompositeVideoClip,
     concatenate_videoclips, AudioFileClip, ColorClip
 )
-from moviepy.video.fx import resize, fadeout, fadein
+from moviepy.video.fx import resize
 from moviepy.video.fx.fadein import fadein
 from moviepy.video.fx.fadeout import fadeout
 
-from ..models.timeline import Timeline, Segment, TransitionType
+from ..models.timeline import Timeline, TimelineSegment, TransitionType
 from ..models.media_asset import MediaAsset, MediaType
 from ..models.project_state import ProjectState
 from ..storage.interface import StorageInterface
@@ -89,8 +89,8 @@ class VideoRenderer:
             video = concatenate_videoclips(final_clips, method="compose")
             
             # Add audio track if specified
-            if timeline.audio_track_id:
-                video = self._add_audio_track(video, timeline.audio_track_id)
+            if timeline.music_track_id:
+                video = self._add_audio_track(video, timeline.music_track_id)
             
             # Write output
             logger.info(f"Rendering video to {output_path}")
@@ -117,20 +117,22 @@ class VideoRenderer:
     
     async def _create_clip_from_segment(
         self,
-        segment: Segment,
+        segment: TimelineSegment,
         media_assets: Dict[str, MediaAsset],
         resolution: Tuple[int, int]
     ) -> Optional[VideoFileClip]:
         """Create a MoviePy clip from a timeline segment."""
-        media = media_assets.get(segment.media_id)
+        media = media_assets.get(segment.media_asset_id)
         if not media:
-            logger.warning(f"Media asset not found: {segment.media_id}")
+            logger.warning(f"Media asset not found: {segment.media_asset_id}")
             return None
         
         try:
             if media.type == MediaType.IMAGE:
+                logger.debug(f"Creating image clip for {media.file_path}")
                 clip = self._create_image_clip(media, segment, resolution)
             elif media.type == MediaType.VIDEO:
+                logger.debug(f"Creating video clip for {media.file_path}")
                 clip = self._create_video_clip(media, segment, resolution)
             else:
                 logger.warning(f"Unsupported media type: {media.type}")
@@ -144,12 +146,14 @@ class VideoRenderer:
             
         except Exception as e:
             logger.error(f"Failed to create clip from {media.file_path}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     def _create_image_clip(
         self,
         media: MediaAsset,
-        segment: Segment,
+        segment: TimelineSegment,
         resolution: Tuple[int, int]
     ) -> ImageClip:
         """Create clip from image file."""
@@ -163,23 +167,44 @@ class VideoRenderer:
     def _create_video_clip(
         self,
         media: MediaAsset,
-        segment: Segment,
+        segment: TimelineSegment,
         resolution: Tuple[int, int]
     ) -> VideoFileClip:
         """Create clip from video file."""
         clip = VideoFileClip(media.file_path)
+        original_duration = clip.duration
+        
+        logger.debug(f"Original video duration: {original_duration:.2f}s, segment needs {segment.duration:.2f}s")
         
         # Apply trimming if specified
-        if segment.trim_start > 0 or segment.trim_end:
-            end_time = segment.trim_end or clip.duration
-            clip = clip.subclipped(segment.trim_start, min(end_time, clip.duration))
+        if segment.in_point > 0 or segment.out_point:
+            # Ensure in_point is within bounds
+            in_point = min(segment.in_point, max(0, clip.duration - 0.1))
+            end_time = segment.out_point or clip.duration
+            # Ensure end_time is within bounds and after in_point
+            end_time = min(end_time, clip.duration)
+            end_time = max(end_time, in_point + 0.1)  # At least 0.1s duration
+            
+            if in_point < clip.duration:
+                clip = clip.subclip(in_point, end_time)
+                logger.debug(f"Trimmed clip from {in_point:.2f}s to {end_time:.2f}s, new duration: {clip.duration:.2f}s")
+            else:
+                logger.warning(f"In point {in_point} exceeds video duration {clip.duration}, using full clip")
         
-        # Ensure clip matches segment duration
-        if clip.duration > segment.duration:
-            clip = clip.subclipped(0, segment.duration)
-        elif clip.duration < segment.duration:
-            # Loop or freeze last frame
-            clip = clip.loop(duration=segment.duration)
+        # For very short clips that need to be extended
+        if clip.duration < segment.duration:
+            # Calculate how many loops we need
+            loops_needed = int(segment.duration / clip.duration) + 1
+            logger.debug(f"Looping clip {loops_needed} times to reach {segment.duration:.2f}s")
+            
+            # Loop the clip
+            clip = clip.loop(n=loops_needed)
+            
+            # Trim to exact duration
+            clip = clip.subclip(0, segment.duration)
+        elif clip.duration > segment.duration:
+            # Trim to exact duration
+            clip = clip.subclip(0, segment.duration)
         
         # Resize to fit resolution
         clip = self._resize_clip(clip, resolution)
@@ -196,7 +221,7 @@ class VideoRenderer:
         new_size = (int(clip_w * scale), int(clip_h * scale))
         
         # Resize
-        clip = resize(clip, newsize=new_size)
+        clip = clip.resize(newsize=new_size)
         
         # Center on background if needed
         if new_size != resolution:
@@ -209,30 +234,16 @@ class VideoRenderer:
         
         return clip
     
-    def _apply_ken_burns(self, clip: ImageClip, duration: float) -> VideoFileClip:
+    def _apply_ken_burns(self, clip: ImageClip, duration: float) -> ImageClip:
         """Apply Ken Burns effect (zoom/pan) to image."""
-        # Simple zoom in effect
-        zoom_factor = 1.2
-        
-        def zoom_func(t):
-            """Zoom function over time."""
-            progress = t / duration
-            current_zoom = 1 + (zoom_factor - 1) * progress
-            return current_zoom
-        
-        # Apply zoom
-        clip = clip.zoom(zoom_func)
-        
-        # Crop to maintain resolution
-        w, h = clip.size
-        clip = clip.fx(resize, newsize=(int(w * 0.9), int(h * 0.9)))
-        
+        # For now, just return the clip as-is
+        # TODO: Implement proper Ken Burns effect with resize over time
         return clip
     
     def _apply_transitions(
         self,
         clips: List[VideoFileClip],
-        segments: List[Segment]
+        segments: List[TimelineSegment]
     ) -> List[VideoFileClip]:
         """Apply transitions between clips."""
         if len(clips) <= 1:
@@ -268,10 +279,10 @@ class VideoRenderer:
             
             # Trim audio to match video duration
             if audio.duration > video.duration:
-                audio = audio.subclipped(0, video.duration)
+                audio = audio.subclip(0, video.duration)
             
-            # Set audio
-            video = video.with_audio(audio)
+            # Set audio using set_audio method
+            video = video.set_audio(audio)
             
             return video
             
@@ -332,7 +343,7 @@ async def render_video(
         )
         
         # Update project state
-        state.rendered_outputs.append(rendered_path)
+        state.output_path = rendered_path
         
         logger.info(f"Video rendered successfully: {rendered_path}")
         

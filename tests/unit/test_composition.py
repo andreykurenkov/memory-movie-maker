@@ -7,7 +7,7 @@ import uuid
 from memory_movie_maker.tools.composition import (
     CompositionAlgorithm, compose_timeline, MediaCluster
 )
-from memory_movie_maker.models.timeline import Timeline, Segment, TransitionType
+from memory_movie_maker.models.timeline import Timeline, TimelineSegment, TransitionType
 from memory_movie_maker.models.media_asset import (
     MediaAsset, MediaType, AudioAnalysisProfile, GeminiAnalysis
 )

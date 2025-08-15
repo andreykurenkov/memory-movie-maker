@@ -94,7 +94,7 @@ class RootAgent:
                 log_complete(logger, "Initial video created without refinement")
                 return {
                     "status": "success",
-                    "video_path": project_state.rendered_outputs[-1] if project_state.rendered_outputs else None,
+                    "video_path": project_state.output_path,
                     "project_state": project_state,
                     "message": "Initial video created (no auto-refinement)",
                     "refinement_iterations": 0
@@ -162,13 +162,13 @@ class RootAgent:
             
             # Phase 5: Finalize and save
             logger.info("Phase 5: Finalizing project")
-            project_state.project_status.phase = "completed"
-            project_state.project_status.progress = 100
+            project_state.status.phase = "completed"
+            project_state.status.progress = 100
             
             # Save final state
             await self._save_project_state(project_state)
             
-            final_video_path = project_state.rendered_outputs[-1] if project_state.rendered_outputs else None
+            final_video_path = project_state.output_path
             final_score = project_state.evaluation_results.get("overall_score", 0) if project_state.evaluation_results else 0
             
             log_complete(logger, f"Memory movie created: {final_video_path}")
@@ -251,7 +251,7 @@ class RootAgent:
                     
                     return {
                         "status": "success",
-                        "video_path": project_state.rendered_outputs[-1],
+                        "video_path": project_state.output_path,
                         "project_state": project_state,
                         "message": "Feedback applied successfully"
                     }
@@ -268,7 +268,7 @@ class RootAgent:
                 
                 return {
                     "status": "success",
-                    "video_path": project_state.rendered_outputs[-1],
+                    "video_path": project_state.output_path,
                     "project_state": project_state,
                     "message": "Video regenerated"
                 }
@@ -302,11 +302,17 @@ class RootAgent:
         for path in media_paths:
             media_type = self._detect_media_type(path)
             if media_type:
+                # Get basic metadata
+                metadata = {}
+                if media_type == MediaType.VIDEO:
+                    # Will be populated during analysis
+                    metadata["duration"] = None
+                
                 asset = MediaAsset(
                     id=str(uuid.uuid4()),
                     file_path=path,
                     type=media_type,
-                    metadata={}
+                    metadata=metadata
                 )
                 media_assets.append(asset)
         
@@ -333,7 +339,7 @@ class RootAgent:
         project_state = ProjectState(
             project_id=str(uuid.uuid4()),
             user_inputs=user_inputs,
-            project_status=ProjectStatus(
+            status=ProjectStatus(
                 phase="analyzing",
                 progress=10,
                 current_task="Initializing project"

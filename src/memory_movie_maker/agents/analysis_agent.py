@@ -2,8 +2,6 @@
 
 import asyncio
 import logging
-import os
-import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -91,10 +89,8 @@ class AnalysisAgent(Agent):
                 if not media_asset.gemini_analysis:
                     visual_tasks.append(self._analyze_visual(media_asset))
             
-            # For videos, also extract and analyze audio if needed
-            if media_asset.type == MediaType.VIDEO:
-                if not media_asset.audio_analysis:
-                    audio_tasks.append(self._analyze_video_audio(media_asset))
+            # Note: For videos, audio is now analyzed as part of Gemini's video analysis
+            # No need for separate audio extraction and analysis
             
             # For audio files, analyze both technical and semantic
             if media_asset.type == MediaType.AUDIO:
@@ -123,8 +119,8 @@ class AnalysisAgent(Agent):
                 logger.warning(f"{error_count} out of {len(all_tasks)} tasks failed")
         
         # Update project phase
-        if project_state.project_status.phase == "analyzing":
-            project_state.project_status.phase = "composing"
+        if project_state.status.phase == "analyzing":
+            project_state.status.phase = "composing"
             log_complete(logger, "Analysis phase complete, ready for composition")
         
         return project_state
@@ -157,6 +153,12 @@ class AnalysisAgent(Agent):
                 # Update media asset with analysis
                 from ..models.media_asset import GeminiAnalysis
                 media_asset.gemini_analysis = GeminiAnalysis(**result["analysis"])
+                
+                # Store video duration in metadata if it's a video
+                if media_asset.type == MediaType.VIDEO and "duration" in result:
+                    if media_asset.metadata is None:
+                        media_asset.metadata = {}
+                    media_asset.metadata["duration"] = result["duration"]
             else:
                 logger.error(f"Visual analysis failed for {Path(media_asset.file_path).name}: {result.get('error')}")
             
@@ -208,59 +210,9 @@ class AnalysisAgent(Agent):
             logger.error(f"Failed to analyze audio semantics {Path(media_asset.file_path).name}: {e}")
         
         return media_asset
-    
-    async def _analyze_video_audio(self, media_asset: MediaAsset) -> MediaAsset:
-        """Extract and analyze audio from video file."""
-        audio_path = None
-        try:
-            log_update(logger, f"Extracting audio from video: {Path(media_asset.file_path).name}")
-            
-            # Extract audio track
-            audio_path = await self._extract_audio_from_video(media_asset.file_path)
-            
-            if audio_path:
-                # Analyze the extracted audio
-                await self._analyze_audio_technical(media_asset)
-                
-                # Also run semantic analysis if the video might have speech
-                if media_asset.gemini_analysis and any(
-                    tag in media_asset.gemini_analysis.tags 
-                    for tag in ["speech", "people", "conversation", "interview"]
-                ):
-                    await self._analyze_audio_semantic(media_asset)
-            
-        except Exception as e:
-            logger.error(f"Failed to extract/analyze video audio {Path(media_asset.file_path).name}: {e}")
-        finally:
-            # Clean up temporary audio file
-            if audio_path and os.path.exists(audio_path):
-                os.unlink(audio_path)
-        
-        return media_asset
-    
-    async def _extract_audio_from_video(self, video_path: str) -> Optional[str]:
-        """Extract audio track from video file."""
-        try:
-            from moviepy.editor import VideoFileClip
-            
-            # Create temporary audio file
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-                audio_path = tmp.name
-            
-            # Extract audio using MoviePy
-            video = VideoFileClip(video_path)
-            if video.audio is not None:
-                video.audio.write_audiofile(audio_path, logger=None)
-                video.close()
-                return audio_path
-            else:
-                logger.warning(f"Video has no audio track: {Path(video_path).name}")
-                video.close()
-                return None
-            
-        except Exception as e:
-            logger.error(f"Failed to extract audio from {Path(video_path).name}: {e}")
-            return None
+    # Note: _analyze_video_audio and _extract_audio_from_video methods removed
+    # Video audio is now analyzed as part of Gemini's comprehensive video analysis
+    # which provides speech transcription, sound effect detection, and audio segmentation
 
 
 # Standalone function for testing
@@ -289,7 +241,7 @@ async def test_analysis_agent():
             media=test_media,
             initial_prompt="Create a test video"
         ),
-        project_status=ProjectStatus(phase="analyzing")
+        status=ProjectStatus(phase="analyzing")
     )
     
     # Create and run agent

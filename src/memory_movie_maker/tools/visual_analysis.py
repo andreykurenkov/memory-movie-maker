@@ -166,10 +166,10 @@ class VisualAnalysisTool:
 Be accurate and objective in your analysis. For images, notable_segments, overall_motion, and scene_changes are not applicable and should be omitted."""
     
     def _create_video_analysis_prompt(self, video_duration: float) -> str:
-        """Create the prompt for full video analysis."""
-        return f"""Analyze this video (duration: {video_duration:.1f} seconds) by examining multiple frames and provide a JSON response with the following structure:
+        """Create the prompt for full video analysis including audio."""
+        return f"""Analyze this video (duration: {video_duration:.1f} seconds) by examining both visual AND audio content together. Provide a comprehensive JSON response with the following structure:
 {{
-  "description": "Overall description of the video content",
+  "description": "Overall description of the video content including audio elements",
   "aesthetic_score": 0.75,  // 0-1 overall visual quality score
   "quality_issues": ["list", "of", "any", "quality", "problems"],
   "main_subjects": ["list", "of", "main", "subjects", "throughout", "video"],
@@ -178,16 +178,40 @@ Be accurate and objective in your analysis. For images, notable_segments, overal
     {{
       "start_time": 0.0,
       "end_time": 3.5,
-      "description": "What happens in this segment",
+      "description": "Complete description of what happens in this segment (both visual and audio)",
+      "visual_content": "What is shown visually",
+      "audio_content": "What is heard (speech content, music description, sound effects)",
+      "audio_type": "speech/music/sfx/ambient/mixed/silence",
+      "speaker": "person1/narrator/unknown (if speech)",
+      "speech_content": "Transcription or summary of speech (if any)",
+      "music_description": "Genre, mood, tempo of music (if any)",
+      "emotional_tone": "happy/sad/exciting/calm/tense/neutral",
       "importance": 0.8,  // 0-1 score for timeline inclusion
-      "tags": ["action", "emotion", "transition"]
+      "sync_priority": 0.7,  // 0-1 score for audio-visual sync importance
+      "recommended_action": "cut_here/hold/transition/sync_to_beat",
+      "tags": ["dialogue", "action", "music", "transition"]
     }}
   ],
   "overall_motion": "Description of overall motion/pacing in the video",
-  "scene_changes": [1.5, 4.2, 7.8]  // Timestamps where major scene changes occur
+  "scene_changes": [1.5, 4.2, 7.8],  // Timestamps where major scene changes occur
+  "audio_summary": {{
+    "has_speech": true/false,
+    "has_music": true/false,
+    "dominant_audio": "speech/music/sfx/ambient",
+    "overall_audio_mood": "Description of the overall audio atmosphere",
+    "audio_quality": "clear/muffled/noisy/distorted",
+    "key_audio_moments": ["loud sound at 2.3s", "music starts at 5.0s", "silence from 8-10s"]
+  }}
 }}
 
-Identify 2-5 notable segments that would be good for a highlight reel. Focus on moments with action, emotion, or visual interest."""
+IMPORTANT: 
+1. Create unified segments that describe BOTH visual and audio content together
+2. Each segment should be a complete unit that makes sense for video editing
+3. Identify natural cut points based on both audio and visual cues
+4. Transcribe or summarize any important speech within each segment
+5. Note any audio-visual synchronization opportunities (e.g., action matching sound)
+6. Keep segments between 0.5 and 5 seconds unless there's a good reason for longer
+7. Focus on creating segments that tell a story when put together"""
     
     async def _load_image(self, image_path: str) -> bytes:
         """Load image data from file or storage."""
@@ -368,6 +392,11 @@ Identify 2-5 notable segments that would be good for a highlight reel. Focus on 
                 
             if 'scene_changes' in data:
                 analysis.scene_changes = data['scene_changes']
+            
+            # Add audio summary if present
+            if 'audio_summary' in data:
+                from ..models.media_asset import AudioSummary
+                analysis.audio_summary = AudioSummary(**data['audio_summary'])
                 
             return analysis
             
@@ -421,10 +450,13 @@ async def analyze_visual_media(file_path: str, storage: Optional[StorageInterfac
         else:  # mime_type.startswith('video/')
             # Analyze complete video
             analysis = await analyzer.analyze_video(file_path)
+            # Get video duration
+            duration = await analyzer._get_video_duration(file_path)
             return {
                 "status": "success",
                 "type": "video",
-                "analysis": analysis.model_dump()
+                "analysis": analysis.model_dump(),
+                "duration": duration
             }
             
     except Exception as e:

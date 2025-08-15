@@ -92,7 +92,7 @@ print(f"Sample rate: {sr}, Duration: {len(y)/sr:.2f}s")
 
 ### Audio Analysis Architecture
 
-The system uses **two complementary audio analysis approaches**:
+The system uses **three complementary audio analysis approaches**:
 
 1. **Technical Analysis (Librosa)**
    - Beat detection and tempo extraction
@@ -100,11 +100,18 @@ The system uses **two complementary audio analysis approaches**:
    - Musical characteristics (danceability, valence)
    - Perfect for rhythm-synced editing
 
-2. **Semantic Analysis (Gemini)**
+2. **Semantic Audio Analysis (Gemini)**
    - Speech transcription and speaker identification
    - Emotional tone and topic extraction
    - Audio segmentation (speech, music, effects)
    - Content-aware video composition
+
+3. **Integrated Video-Audio Analysis (Gemini)**
+   - Unified segmentation of videos with both visual and audio content
+   - Speech transcription within video context
+   - Sound effect detection and importance scoring
+   - Audio-visual synchronization recommendations
+   - Emotional tone tracking across segments
 
 Both tools work together to enable intelligent video editing that syncs with both the rhythm AND meaning of audio content.
 

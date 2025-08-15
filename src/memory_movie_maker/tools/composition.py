@@ -359,7 +359,7 @@ async def compose_timeline(
         # Find music track if available
         music_track_id = None
         if state.user_inputs.music and len(state.user_inputs.music) > 0:
-            music_track_id = state.user_inputs.music[0].id
+            music_track_id = state.user_inputs.music[0].file_path
         
         # Convert planned segments to timeline segments
         segments = []
@@ -398,10 +398,11 @@ async def compose_timeline(
         algorithm = CompositionAlgorithm()
         segments = algorithm._apply_transitions(segments, style_prefs)
         
-        # Create timeline
+        # Create timeline with correct total duration
+        actual_duration = segments[-1].end_time if segments else 0.0
         timeline = Timeline(
             segments=segments,
-            total_duration=plan.total_duration,
+            total_duration=actual_duration,
             music_track_id=music_track_id
         )
         
