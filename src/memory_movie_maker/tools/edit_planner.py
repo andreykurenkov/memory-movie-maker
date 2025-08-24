@@ -247,131 +247,85 @@ a single video that captures and preserves the memories from this experience.
 
 USER REQUEST: {user_prompt}
 TARGET DURATION: {target_duration} seconds
-EDITING STYLE: {style_preferences.get('style', 'balanced')}
 
 AVAILABLE MEDIA:
 {json.dumps(media_info, indent=2)}
 
 {'MUSIC TRACK:' + json.dumps(music_info, indent=2) if music_info else 'NO MUSIC TRACK'}
 
-CREATIVE GUIDELINES:
+## Creative Guidelines
 
-1. STORY STRUCTURE:
-   - Create a clear narrative arc with beginning, middle, and end
-   - Use story beats: Establishing shot → Development → Climax → Resolution
-   - Each segment should advance the story or emotional journey
+### Most Critical Rules
+• **Never repeat clips** - each media_id appears only once
+• **Match cuts to music** beats/energy when music is present  
+• **Prioritize quality** - use clips with aesthetic_score > 0.7
 
-2. PROFESSIONAL PACING & COMPOSITION:
-   - CRITICAL: Never repeat the same clip - each media_id should appear ONLY ONCE in the edit
-   - IMPORTANT: Use trim_start and trim_end to select DIFFERENT portions of long videos
-   - For videos: Always specify trim_start/trim_end to extract the EXACT segment needed
-   - Maintain NATURAL playback speed - clips should play at 1x speed (duration = trim_end - trim_start)
-   
-   PROFESSIONAL SHOT LENGTHS:
-   - Quick cuts: 0.5-2s (for energy, montages, beat syncs)
-   - Standard shots: 2-4s (for most content, allows viewer comprehension)
-   - Breathing shots: 4-6s (for emotional moments, establishing shots)
-   - Hero shots: 6-8s MAX (only for truly exceptional moments)
-   - AVOID: Shots under 0.5s (too jarring) or over 8s (loses engagement)
-   
-   RULE OF THIRDS TIMING:
-   - Place visual peaks at 1/3 and 2/3 points in the timeline
-   - Build energy in waves, not a straight line
-   - Use the 3-act structure even in short videos
+### Shot Duration
+• Quick cuts: 0.5-2s (energy, montages)
+• Standard: 2-4s (most content)
+• Emotional: 4-6s (key moments)
+• Maximum: 8s (avoid longer)
 
-3. EMOTIONAL IMPACT:
-   - Build emotional intensity gradually
-   - Place the most impactful moments at key points (1/3 and 2/3 marks)
-   - Use quieter moments for emotional breathing room
-   - End with a memorable, satisfying conclusion
+### Pacing Essentials
+• Vary shot types and compositions
+• Build energy in waves, not straight lines
+• Place best moments at 1/3 and 2/3 points
+• Create rhythm through variety
 
-4. PROFESSIONAL QUALITY STANDARDS:
-   - MINIMUM aesthetic score: 0.7 (reject anything below unless it's narratively essential)
-   - Prioritize clips with scores > 0.8 for key moments
-   - For videos, use the notable_moments identified in analysis
-   - Match visual energy to musical energy when possible
-   
-   AVOID AMATEUR MISTAKES:
-   - Never use blurry, shaky, or poorly lit clips unless absolutely necessary
-   - Don't put similar shots back-to-back (vary composition)
-   - Avoid jarring aspect ratio changes
-   - Never cut mid-action unless intentional
-   - Don't overuse any single type of shot
-   - IMPORTANT: Use each clip ONLY ONCE - no repetition
-   - For chronological events (concerts, festivals), maintain temporal flow
-   - It's fine NOT to use every video/image provided - quality over quantity
-   - If multiple clips show the same moment/event, pick the BEST ONE only
-   
-   CHRONOLOGICAL AWARENESS & REDUNDANCY HANDLING:
-   - Media files are sorted chronologically (see chronological_index)
-   - Files with similar timestamps likely show the SAME event/performance from different angles
-   - When you have multiple videos of the same moment:
-     * Understand they're showing the SAME thing (e.g., same band performance, same speech)
-     * Choose ONLY the BEST angle/quality - don't use both
-     * Look for clues: similar subjects, matching audio, close timestamps
-     * If unsure, check the descriptions and tags for matches
-   - It's PERFECTLY FINE to skip redundant media - better to have a tight edit than use everything
-   - Respect the natural flow of events unless artistic reasons dictate otherwise
-   
-5. PROFESSIONAL TRANSITION DISCIPLINE:
-   - DEFAULT TO CRASH CUTS: Use "cut" (instant transition) as your primary transition
-   - Crash cuts create energy, maintain pace, and feel modern/professional
-   - ONLY use special transitions when there's a specific reason:
-     * "fade": Major scene changes, time jumps, beginning/ending only
-     * "crossfade": Dreamy sequences, flashbacks (use sparingly - max 2-3 per video)
-     * "cut": Everything else (90-95% of transitions should be cuts)
-   
-   PROFESSIONAL TRANSITION RULES:
-   - Cut on action (mid-movement) for seamless flow
-   - Cut on beat for musical videos
-   - Match cut when possible (similar shapes/movements between shots)
-   - J-cuts and L-cuts for dialogue (audio leads or follows video)
-   - NEVER use cheesy transitions (star wipes, spirals, etc.)
+### Quality Standards
+• Skip blurry/shaky/dark clips unless essential
+• For videos: use trim_start/trim_end to extract best parts
+• Match visual energy to music energy
+• End with something memorable
 
-6. PROFESSIONAL MUSIC SYNCHRONIZATION:
-   - BEAT PRECISION: Cuts should land EXACTLY on beat, not "near" the beat
-   - Place key visual moments on strong beats and musical transitions
-   - Match cutting rhythm to tempo: Fast music = shorter clips
-   - Use energy curve: High energy → dynamic cuts, Low energy → longer takes
-   - Leave space for the music to breathe
-   
-   PROFESSIONAL SYNC TECHNIQUES:
-   - Hit the downbeat (1st beat of measure) for major changes
-   - Use snare hits for impact cuts
-   - Sync visual peaks with musical crescendos
-   - Create visual "drops" that match musical drops
-   - Pull back during musical bridges for contrast
-   
-   IMPORTANT: If detailed musical segments are provided:
-   - Sync major visual transitions with musical structure changes (verse→chorus, buildup→drop)
-   - Use "sync_priority" scores to identify must-sync moments
-   - Align emotional peaks in visuals with "energy_peaks" in music
-   - Cut on "recommended_cut_points" for natural flow
-   - Match visual energy to "energy_transition" states (building, dropping, peak, valley)
+### Handling Redundant Media
+• Media files are sorted chronologically (see chronological_index)
+• Multiple files with similar timestamps often show the same moment from different angles
+• When you have duplicate coverage:
+  - Choose only the BEST angle/quality
+  - Prefer video over photos of the same moment
+  - It's perfectly fine to skip redundant media
+• Maintain temporal flow for events unless artistic reasons dictate otherwise
 
-7. VIDEO AUDIO INTEGRATION:
-   - If video contains speech, preserve complete sentences/phrases when possible
-   - Use "video_audio.recommended_cuts" for natural audio break points
-   - Match emotional tone of video speech with overall mood
-   - For videos with music, consider layering or transitioning between video and background music
-   - Respect "sync_priority" in video segments for important audio-visual moments
-   - If video has dialogue, ensure important speech is not cut mid-sentence
-   - Use sound effects timing to enhance transitions (e.g., door closing as transition point)
+### Transition Discipline
+• **Default to cuts** - Use "cut" for 90-95% of transitions
+• Cuts create energy and maintain pace
+• Only use special transitions with purpose:
+  - "fade": Scene changes, time jumps, beginning/ending
+  - "crossfade": Dreamy/emotional moments (use sparingly)
+  - "cut": Everything else
 
-8. INTELLIGENT AUDIO MIXING DECISIONS:
-   - For each video segment, decide whether to preserve its original audio
-   - Consider preserving original audio when:
-     * Video contains important dialogue or narration
-     * Ambient sounds enhance the atmosphere (waves, laughter, etc.)
-     * Sound effects add impact (door closing, applause, etc.)
-     * Video has its own music that complements the background track
-   - Set original_audio_volume DECISIVELY (avoid muddy 50/50 mixing):
-     * 0.8-1.0: Important dialogue, speeches, live performances (original DOMINATES)
-     * 0.1-0.2: Ambient crowd noise, background sounds (music DOMINATES)
-     * 0.0: Mute original audio completely (music only)
-     * NEVER USE 0.3-0.7: This creates dissonant mixing - be decisive!
-   - The system will automatically mix at 80/20 ratio based on your choice
-   - Provide audio_reasoning to explain which track should dominate
+• Cut on action (mid-movement) for seamless flow
+• Cut on beat for musical videos
+• Match cut when possible (similar shapes/movements between shots)
+• Never use cheesy transitions (star wipes, spirals, etc.)
+
+### Music Synchronization (when music is present)
+• **Cuts must hit beats exactly** - not "near" the beat
+• Match cutting rhythm to tempo: fast music = shorter clips
+• Place key moments on strong beats and musical transitions
+• Sync visual peaks with musical crescendos
+• If musical segments are provided in analysis:
+  - Use "sync_priority" scores for must-sync moments
+  - Cut on "recommended_cut_points" for natural flow
+  - Match visual energy to "energy_transition" states
+
+### Audio Handling
+• Preserve complete sentences/phrases when video contains speech
+• Use "video_audio.recommended_cuts" for natural break points
+• Match emotional tone of video speech with overall mood
+
+### Audio Mixing Decisions
+**Be decisive with audio mixing - avoid muddy 50/50 mixes:**
+• **0.8-1.0**: Important dialogue, speeches, performances (original dominates)
+• **0.1-0.2**: Ambient sounds, crowd noise (music dominates)  
+• **0.0**: Mute original audio (music only)
+• **Never use 0.3-0.7**: This creates muddy mixing
+
+Consider preserving original audio when:
+• Video contains important dialogue or narration
+• Ambient sounds enhance atmosphere (waves, laughter)
+• Sound effects add impact (applause, etc.)
 
 Return a complete edit plan as JSON:
 {{
