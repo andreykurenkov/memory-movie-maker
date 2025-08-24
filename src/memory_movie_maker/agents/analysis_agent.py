@@ -100,11 +100,30 @@ class AnalysisAgent(Agent):
                 if not media_asset.semantic_audio_analysis:
                     audio_tasks.append(self._analyze_audio_semantic(media_asset))
         
-        # Process all analyses concurrently
+        # Process all analyses with limited concurrency to avoid memory issues
         if visual_tasks or audio_tasks:
-            log_update(logger, f"Running {len(visual_tasks)} visual and {len(audio_tasks)} audio analyses concurrently...")
+            log_update(logger, f"Running {len(visual_tasks)} visual and {len(audio_tasks)} audio analyses...")
             
             all_tasks = visual_tasks + audio_tasks
+            
+            # Limit concurrent uploads to avoid bus errors with large files
+            # Use semaphore to limit to 2 concurrent uploads (safer for large files)
+            MAX_CONCURRENT_UPLOADS = 2
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
+            completed_count = 0
+            
+            async def run_with_semaphore(task_idx, task):
+                nonlocal completed_count
+                async with semaphore:
+                    # Add small delay to avoid overwhelming the system
+                    await asyncio.sleep(0.1)
+                    result = await task
+                    completed_count += 1
+                    log_update(logger, f"Analysis progress: {completed_count}/{len(all_tasks)} completed")
+                    return result
+            
+            # Wrap tasks with semaphore
+            limited_tasks = [run_with_semaphore(i, task) for i, task in enumerate(all_tasks)]
             
             # Run tasks and collect both results and exceptions
             errors = []
@@ -112,7 +131,7 @@ class AnalysisAgent(Agent):
             
             # Use gather without return_exceptions to properly propagate critical errors
             try:
-                results = await asyncio.gather(*all_tasks)
+                results = await asyncio.gather(*limited_tasks)
                 successful = len(results)
                 log_update(logger, f"All {len(all_tasks)} analysis tasks completed successfully")
             except Exception as e:
