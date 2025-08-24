@@ -182,12 +182,19 @@ class VisualAnalysisTool:
         """Create the prompt for image analysis."""
         return """Analyze this image with PROFESSIONAL STANDARDS and provide a detailed JSON response:
 {
-  "description": "A clear, concise description of what's in the image",
+  "description": "Write 1-2 sentences describing the scene. Be specific about location, action, and atmosphere",
   "aesthetic_score": 0.85,  // 0-1 score - BE STRICT: 0.9+ exceptional, 0.7-0.9 good, 0.5-0.7 acceptable, <0.5 poor
   "quality_issues": ["list", "of", "any", "quality", "problems"],
   "main_subjects": ["list", "of", "main", "subjects", "or", "people"],
   "tags": ["relevant", "tags", "for", "categorization"]
 }
+
+DESCRIPTION EXAMPLES (write similar style):
+- "Outdoor music festival with crowd near blue and white striped main stage tent at sunset. People wearing band t-shirts and festival wristbands are dancing in grassy field."
+- "Close-up of street musician in red flannel shirt playing acoustic guitar with neon storefront signs blurred in background. Gibson logo visible on guitar headstock."
+- "Aerial view of beach party showing yellow and orange umbrellas, white popup tents with 'Corona' branding. Groups scattered on tan sand with turquoise ocean waves visible."
+
+IMPORTANT: Include specific visual details like colors, text on signs/clothing, logos, building names, or any distinguishing features that help identify the scene.
 
 SCORING GUIDELINES (be critical):
 - Deduct for: blur, noise, poor lighting, bad framing, distracting backgrounds
@@ -199,7 +206,7 @@ SCORING GUIDELINES (be critical):
         """Create the prompt for full video analysis including audio."""
         return f"""Analyze this video (duration: {video_duration:.1f} seconds) by examining both visual AND audio content together. Provide a comprehensive JSON response with the following structure:
 {{
-  "description": "Overall description of the video content including audio elements",
+  "description": "Write 2-3 sentences describing the overall video. Include setting, main action, and mood/atmosphere",
   "aesthetic_score": 0.75,  // 0-1 overall visual quality score
   "quality_issues": ["list", "of", "any", "quality", "problems"],
   "main_subjects": ["list", "of", "main", "subjects", "throughout", "video"],
@@ -208,7 +215,7 @@ SCORING GUIDELINES (be critical):
     {{
       "start_time": 0.0,
       "end_time": 3.5,
-      "description": "Complete description of what happens in this segment (both visual and audio)",
+      "description": "1-2 sentences about what happens in this segment. Be specific about action and atmosphere",
       "visual_content": "What is shown visually",
       "audio_content": "What is heard (speech content, music description, sound effects)",
       "audio_type": "speech/music/sfx/ambient/mixed/silence",
@@ -233,6 +240,20 @@ SCORING GUIDELINES (be critical):
     "key_audio_moments": ["loud sound at 2.3s", "music starts at 5.0s", "silence from 8-10s"]
   }}
 }}
+
+DESCRIPTION EXAMPLES (write similar style):
+Overall video descriptions:
+- "Rock band performing on black stage with purple LED backdrop in dark venue, crowd visible in foreground. Video alternates between wide venue shots and close-ups of guitarist in denim jacket and drummer."
+- "Handheld camera following people in summer clothing through rows of food trucks with colorful banners and menu boards. Signs visible for 'Thai Street Food' and 'BBQ Pit' vendors."
+- "Time-lapse of main stage area with 'Summer Fest 2024' banner, crowd growing from sparse to packed. Blue daylight transitions to orange sunset then purple stage lighting."
+
+Segment descriptions (focus on what's unique to this moment, don't repeat overall context):
+- "Singer leans forward and points at crowd during guitar solo. Red strobes hit as drums kick in."
+- "Close-up on girl in tie-dye shirt singing along, then cut to couple taking selfie."
+- "Food truck worker hands order through window, customer in Yankees cap receives it and walks off."
+
+IMPORTANT: Include specific visual details like colors, clothing, signs, logos, text, or any distinguishing features.
+For segments, focus on the specific action/moment without restating the overall scene context.
 
 IMPORTANT: 
 1. Create unified segments that describe BOTH visual and audio content together

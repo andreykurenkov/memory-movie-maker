@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     batch_size: int = 10
     analysis_cache_enabled: bool = True
     analysis_cache_ttl: int = 86400  # 24 hours in seconds
+    upload_music_to_edit_planner: bool = False  # Whether to upload music file to Gemini for edit planning
     
     # Video rendering
     default_video_resolution: str = "1920x1080"

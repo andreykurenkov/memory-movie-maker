@@ -1,5 +1,6 @@
 """Edit planning tool using Gemini for intelligent timeline creation."""
 
+import asyncio
 import json
 import logging
 from typing import Dict, Any, List, Optional
@@ -71,9 +72,15 @@ class EditPlanner:
             media_assets, music_profile, target_duration, user_prompt, style_preferences, music_asset
         )
 
-        # Call Gemini
+        # Get music file path if available and enabled in settings
+        music_file_path = None
+        if settings.upload_music_to_edit_planner and music_asset and music_asset.file_path:
+            music_file_path = music_asset.file_path
+            log_update(logger, "Will upload music file to Gemini for better sync")
+
+        # Call Gemini with music file if available
         log_update(logger, "Asking Gemini to plan the edit...")
-        response = await self._call_gemini(prompt)
+        response = await self._call_gemini(prompt, music_file_path)
 
         # Parse the response
         log_update(logger, "Parsing edit plan...")
@@ -118,73 +125,93 @@ class EditPlanner:
                 "id": simple_id,
                 "original_id": asset.id,  # Keep mapping for execution
                 "type": asset.type,
-                "index": i,  # Chronological position
             }
+
+            # Add creation date if available
+            if asset.metadata and asset.metadata.get("creation_date"):
+                info["creation_date"] = asset.metadata["creation_date"]
+            elif asset.metadata and asset.metadata.get("modification_date"):
+                info["creation_date"] = asset.metadata["modification_date"]  # Fallback to mod date
 
             # Essential metadata only
             if asset.type == "video":
                 info["duration"] = asset.duration or asset.metadata.get("duration", 0)
+            
+            # Add orientation info for both videos and images
+            if asset.metadata:
+                width = asset.metadata.get("width", 0)
+                height = asset.metadata.get("height", 0)
+                if width and height:
+                    if width > height:
+                        info["orientation"] = "landscape"
+                    elif height > width:
+                        info["orientation"] = "portrait"
+                    else:
+                        info["orientation"] = "square"
+                    info["aspect_ratio"] = f"{width}x{height}"
 
             # Analysis results - only the most important fields
             if asset.gemini_analysis:
-                info["description"] = asset.gemini_analysis.description[:100]  # Truncate long descriptions
+                # Full description, no truncation
+                info["description"] = asset.gemini_analysis.description
                 info["quality"] = round(asset.gemini_analysis.aesthetic_score, 2)
-                info["subjects"] = asset.gemini_analysis.main_subjects[:3]  # Top 3 subjects only
+                info["subjects"] = asset.gemini_analysis.main_subjects[:5]  # Top 5 subjects for better context
 
                 if hasattr(asset.gemini_analysis, 'notable_segments') and asset.gemini_analysis.notable_segments:
-                    # Only include the top 3 most important segments
+                    # Get top 3 most important segments, then sort by start time
                     top_segments = sorted(
                         asset.gemini_analysis.notable_segments,
                         key=lambda s: s.importance,
                         reverse=True
                     )[:3]
+
+                    # Sort by start time for better readability
+                    top_segments_sorted = sorted(top_segments, key=lambda s: s.start_time)
+
                     info["key_moments"] = [
                         {
                             "start": seg.start_time,
                             "end": seg.end_time,
-                            "description": seg.description[:50],  # Brief description
+                            "description": seg.description,  # Full description, no truncation
                             "importance": round(seg.importance, 2)
                         }
-                        for seg in top_segments
+                        for seg in top_segments_sorted
                     ]
 
             media_info.append(info)
 
-        # Format music information
+        # Format music information - adjust based on whether we're uploading the file
         music_info = None
         if music_profile:
-            music_info = {
-                "tempo": music_profile.tempo_bpm,
-                "duration": music_profile.duration,
-                "mood": music_profile.vibe.mood,
-                "energy_level": music_profile.vibe.energy,
-                "beat_count": len(music_profile.beat_timestamps),
-                "energy_curve_summary": self._summarize_energy_curve(music_profile.energy_curve)
-            }
+            if settings.upload_music_to_edit_planner:
+                # Simplified info when uploading the actual file
+                music_info = {
+                    "tempo": music_profile.tempo_bpm,
+                    "duration": music_profile.duration,
+                    "note": "The actual music file is attached to this prompt - listen to it directly for beat matching and emotional sync"
+                }
+            else:
+                # More detailed info when not uploading the file
+                music_info = {
+                    "tempo": music_profile.tempo_bpm,
+                    "duration": music_profile.duration,
+                    "mood": music_profile.vibe.mood if music_profile.vibe else "unknown",
+                    "energy_level": music_profile.vibe.energy if music_profile.vibe else 0.5,
+                    "beat_count": len(music_profile.beat_timestamps),
+                    "energy_curve_summary": self._summarize_energy_curve(music_profile.energy_curve)
+                }
 
-            # Add detailed musical segmentation if available
-            if music_asset and music_asset.semantic_audio_analysis:
-                semantic = music_asset.semantic_audio_analysis
-                music_info["musical_structure"] = semantic.get("musical_structure_summary", "")
-                music_info["energy_peaks"] = semantic.get("energy_peaks", [])
-                music_info["recommended_cut_points"] = semantic.get("recommended_cut_points", [])
-                music_info["key_moments"] = semantic.get("key_moments", [])
-
-                # Include musical segments
-                if semantic.get("segments"):
-                    music_info["detailed_segments"] = [
-                        {
-                            "start": seg.get("start_time", 0),
-                            "end": seg.get("end_time", 0),
-                            "type": seg.get("type", ""),
-                            "content": seg.get("content", ""),
-                            "musical_structure": seg.get("musical_structure"),
-                            "energy_transition": seg.get("energy_transition"),
-                            "sync_priority": seg.get("sync_priority", 0.5)
-                        }
-                        for seg in semantic.get("segments", [])
-                        if seg.get("type") in ["music", "intro", "verse", "chorus", "bridge", "outro", "drop", "buildup"]
-                    ]
+                # Add semantic analysis if available
+                if music_asset and music_asset.semantic_audio_analysis:
+                    semantic = music_asset.semantic_audio_analysis
+                    if semantic.get("overall_description"):
+                        music_info["description"] = semantic["overall_description"]
+                    if semantic.get("genre"):
+                        music_info["genre"] = semantic["genre"]
+                    if semantic.get("musical_structure_summary"):
+                        music_info["structure"] = semantic["musical_structure_summary"]
+                    if semantic.get("energy_peaks"):
+                        music_info["energy_peaks"] = semantic["energy_peaks"][:10]  # Top 10 peaks
 
         # Create ID mapping for converting back to original IDs
         id_mapping = {info["id"]: info["original_id"] for info in media_info}
@@ -195,16 +222,12 @@ class EditPlanner:
 
 You are a professional video editor. The user has provided a collection of media files (photos and videos) from an event, trip, or personal experience. Your task is to create a detailed edit plan that selects and arranges these media files into a cohesive video.
 
-## Requirements
-
-- **User Request**: {user_prompt}
-- **Target Duration**: {target_duration} seconds (your edit must be within 5 seconds of this)
-
 ## Editing Guidelines
 
 ### Most Critical Rules
 • **Never repeat clips** - each media_id appears only once
 • **STRONGLY prefer videos over photos** - only use photos if no video coverage exists
+• **Follow chronological order** - Media is sorted by time, preserve this flow unless music/story demands otherwise
 • **Match cuts to music** beats/energy when music is present  
 • **Prioritize quality** - use clips with quality score > 0.7
 
@@ -227,14 +250,25 @@ You are a professional video editor. The user has provided a collection of media
 • End with something memorable
 
 ### Handling Redundant Media
-• Media files are sorted chronologically (see index field)
-• Multiple files with similar timestamps often show the same moment from different angles
-• When you have duplicate coverage:
+• Media files are sorted chronologically - generally progress forward through them
+• It's fine to:
+  - Skip clips that don't fit (e.g., use m000, m003, m007 - skipping m001, m002, etc.)
+  - Use multiple segments from the same video with different trim points
+  - Jump back to an earlier clip if needed for music sync or story reasons
+• When you have duplicate coverage of the same moment:
   - Choose only the BEST angle/quality
   - **ALWAYS prefer video over photos** of the same moment
-  - It's perfectly fine to skip redundant media
-• Photos should only be used when there's NO video coverage of that part of the event
-• Maintain temporal flow for events unless artistic reasons dictate otherwise
+• Avoid excessive back-and-forth jumping between clips (m000, m010, m001, m009...)
+• Photos should only be used when there's NO video coverage of that time period
+
+### Handling Orientation Mismatches
+• Check each media file's "orientation" field (landscape/portrait/square)
+• When orientation doesn't match target:
+  - Prefer clips that match the target orientation when possible
+  - Portrait videos in landscape output will have black bars on sides (pillarboxing)
+  - Landscape videos in portrait output will have black bars on top/bottom (letterboxing)
+  - This is normal and preferred over stretching/distorting
+• Try to group similar orientations together to minimize jarring transitions
 
 ### Transition Discipline
 • **Default to cuts** - Use "cut" for 90-95% of transitions
@@ -282,6 +316,9 @@ Consider preserving original audio when:
 The media files are already sorted chronologically. Each file has:
 - **id**: Simple reference ID (m000, m001, etc.) 
 - **type**: "image" or "video"
+- **creation_date**: When the file was created (if available)
+- **orientation**: "landscape", "portrait", or "square"
+- **aspect_ratio**: Original dimensions (e.g., "1920x1080")
 - **quality**: Aesthetic score from 0-1 (higher is better)
 - **duration**: For videos, length in seconds
 - **description**: Brief content description
@@ -292,7 +329,7 @@ The media files are already sorted chronologically. Each file has:
 {json.dumps(media_info, indent=2)}
 ```
 
-{('## Music Track' + chr(10) + chr(10) + '```json' + chr(10) + json.dumps(music_info, indent=2) + chr(10) + '```') if music_info else '## Note: No Music Track Provided'}
+{self._format_music_section(music_info)}
 
 # Output Format
 
@@ -340,8 +377,12 @@ QUALITY CHECKLIST:
 ✓ Ending provides satisfying closure
 ✓ Overall feels broadcast/commercial quality
 
-## Your Task
+## Requirements
+- **User Request**: {user_prompt}
+- **Target Duration**: {target_duration} seconds (your edit must be within 5 seconds of this)
+- **Target Aspect Ratio**: {style_preferences.get('aspect_ratio', '16:9')} ({self._get_orientation_from_ratio(style_preferences.get('aspect_ratio', '16:9'))})
 
+## Your Task
 Analyze the available media files and create a detailed edit plan that:
 1. Selects the best clips (strongly preferring videos over photos)
 2. Arranges them in an engaging sequence
@@ -373,35 +414,121 @@ Create the edit plan now."""
 
         return f"High energy at: {', '.join(high_energy_times[:5])}... Low energy at: {', '.join(low_energy_times[:5])}..."
 
-    async def _call_gemini(self, prompt: str) -> str:
-        """Call Gemini API with the edit planning prompt.
+    def _get_orientation_from_ratio(self, aspect_ratio: str) -> str:
+        """Get orientation description from aspect ratio string."""
+        if aspect_ratio in ['16:9', '21:9', '4:3']:
+            return 'landscape'
+        elif aspect_ratio == '9:16':
+            return 'portrait'
+        elif aspect_ratio == '1:1':
+            return 'square'
+        else:
+            # Parse custom ratio
+            try:
+                parts = aspect_ratio.split(':')
+                width = float(parts[0])
+                height = float(parts[1])
+                if width > height:
+                    return 'landscape'
+                elif height > width:
+                    return 'portrait'
+                else:
+                    return 'square'
+            except Exception:
+                return 'landscape'  # Default
+    
+    def _format_music_section(self, music_info: Optional[Dict[str, Any]]) -> str:
+        """Format the music section based on whether we're uploading the file."""
+        if not music_info:
+            return "## Note: No Music Track Provided"
+
+        if settings.upload_music_to_edit_planner:
+            # When uploading the actual file
+            return f"""## Music Track
+
+The music file is attached to this prompt. Duration: {music_info['duration']:.1f}s, Tempo: {music_info['tempo']:.1f} BPM
+
+Listen to the attached audio file directly to understand its rhythm, energy changes, and emotional progression. Sync your edits to the actual beats and musical moments you hear."""
+        else:
+            # When not uploading, provide analysis data
+            section = "## Music Track\n"
+
+            # Add description and genre if available
+            if music_info.get('description'):
+                section += f"\nDescription: {music_info['description']}"
+            if music_info.get('genre'):
+                section += f"\nGenre: {music_info['genre']}"
+
+            section += f"""
+Duration: {music_info['duration']:.1f}s, Tempo: {music_info['tempo']:.1f} BPM
+Mood: {music_info.get('mood', 'unknown')}, Energy Level: {music_info.get('energy_level', 0):.2f}
+{music_info.get('energy_curve_summary', '')}"""
+
+            if music_info.get('structure'):
+                section += f"\nStructure: {music_info['structure']}"
+
+            if music_info.get('energy_peaks'):
+                peaks_str = ', '.join([f"{p:.1f}s" for p in music_info['energy_peaks']])
+                section += f"\nKey energy peaks at: {peaks_str}"
+
+            return section
+
+    async def _call_gemini(self, prompt: str, music_file_path: Optional[str] = None) -> str:
+        """Call Gemini API with the edit planning prompt and optionally the music file.
         
         Uses thinking config to allow the model to reason through the edit plan
         with up to 2000 tokens of internal thinking before generating the response.
         """
         try:
-            # Create config with thinking enabled for better reasoning
+            # Create config with thinking enabled for better reasoning and sufficient output space
             config = types.GenerateContentConfig(
                 thinking_config=types.ThinkingConfig(
-                    thinking_budget=10000  # Allow up to 2k tokens for thinking
-                )
+                    thinking_budget=-1  # Allow up to 10k tokens for thinking
+                ),
+                max_output_tokens=15000  # Allow up to 8k tokens for the edit plan
             ) if types else None
-            
+
+            # Prepare contents
+            contents = [prompt]
+
+            # Upload music file if provided
+            if music_file_path and self._client:
+                logger.info(f"Uploading music file: {music_file_path}")
+                music_file = self._client.files.upload(file=music_file_path)
+
+                # Wait for file to be processed
+                while music_file.state.name == "PROCESSING":
+                    await asyncio.sleep(0.5)
+                    music_file = self._client.files.get(name=music_file.name)
+
+                if music_file.state.name == "FAILED":
+                    logger.warning("Music file upload failed, proceeding without it")
+                else:
+                    contents.append(music_file)
+                    logger.info("Music file uploaded successfully")
+
             # Call with thinking config if available
             if config:
-                logger.info("Using thinking config with 2k token budget for edit planning")
+                logger.info("Using thinking config with 10k token budget for edit planning")
                 response = self._client.models.generate_content(
                     model=self._model_name,
-                    contents=prompt,
+                    contents=contents,
                     config=config
                 )
             else:
                 # Fallback without thinking config
                 response = self._client.models.generate_content(
                     model=self._model_name,
-                    contents=prompt
+                    contents=contents
                 )
-            
+
+            # Clean up uploaded file if we uploaded one
+            if music_file_path and self._client and 'music_file' in locals():
+                try:
+                    self._client.files.delete(name=music_file.name)
+                except Exception:
+                    pass  # Ignore cleanup errors
+
             return response.text
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
