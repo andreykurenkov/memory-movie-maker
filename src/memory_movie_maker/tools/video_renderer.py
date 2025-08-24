@@ -230,23 +230,19 @@ class VideoRenderer:
             if in_point < clip.duration:
                 clip = clip.subclip(in_point, end_time)
                 logger.debug(f"Trimmed clip from {in_point:.2f}s to {end_time:.2f}s, new duration: {clip.duration:.2f}s")
+                # Note: The actual duration is now the trimmed duration, not the segment duration
             else:
                 logger.warning(f"In point {in_point} exceeds video duration {clip.duration}, using full clip")
-        
-        # Adjust clip duration to match segment duration
-        if clip.duration < segment.duration:
-            # Pad with black frames to match expected duration
-            logger.warning(f"Clip duration ({clip.duration:.2f}s) shorter than segment ({segment.duration:.2f}s). Padding with black.")
-            # Create a black clip for the remaining duration
-            padding_duration = segment.duration - clip.duration
-            black_padding = ColorClip(size=clip.size, color=(0, 0, 0), duration=padding_duration)
-            # Concatenate the clip with black padding
-            from moviepy.editor import concatenate_videoclips
-            # Note: This creates a new clip, original clip and black_padding are embedded
-            clip = concatenate_videoclips([clip, black_padding])
-        elif clip.duration > segment.duration:
-            # Trim to exact duration
-            clip = clip.subclip(0, segment.duration)
+        else:
+            # No trimming specified, use segment duration
+            if clip.duration > segment.duration:
+                # Trim to exact duration
+                clip = clip.subclip(0, segment.duration)
+                logger.debug(f"Trimmed clip to segment duration: {segment.duration:.2f}s")
+            elif clip.duration < segment.duration:
+                # Only pad if the original clip is shorter than needed (no trim points specified)
+                logger.warning(f"Original clip ({clip.duration:.2f}s) shorter than segment ({segment.duration:.2f}s). Using available duration.")
+                # Don't pad - just use what we have
         
         # Resize to fit resolution
         clip = self._resize_clip(clip, resolution)

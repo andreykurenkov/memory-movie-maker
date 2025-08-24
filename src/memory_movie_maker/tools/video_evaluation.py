@@ -82,21 +82,35 @@ class VideoEvaluator:
                     lambda: self._client.files.upload(file=video_path)
                 )
                 
-                # Cache the upload
-                VideoEvaluator._file_cache[cache_key] = video_file
-                VideoEvaluator._cache_timestamps[cache_key] = asyncio.get_event_loop().time()
+                # Wait for file to be processed
+                logger.info("Waiting for video file to be processed...")
+                max_wait_time = 60  # Maximum 60 seconds
+                wait_interval = 2   # Check every 2 seconds
+                total_waited = 0
                 
-                # Wait for processing
-                await asyncio.sleep(2)
-                
-                # Check file status
-                file_info = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self._client.files.get(name=video_file.name)
-                )
+                while total_waited < max_wait_time:
+                    await asyncio.sleep(wait_interval)
+                    total_waited += wait_interval
+                    
+                    # Check file status
+                    file_info = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: self._client.files.get(name=video_file.name)
+                    )
+                    
+                    if file_info.state == "ACTIVE":
+                        logger.info("Video file ready for evaluation")
+                        # Cache the upload only after it's active
+                        VideoEvaluator._file_cache[cache_key] = video_file
+                        VideoEvaluator._cache_timestamps[cache_key] = asyncio.get_event_loop().time()
+                        break
+                    elif file_info.state == "FAILED":
+                        raise ValueError(f"Video file processing failed: {file_info.state}")
+                    else:
+                        logger.debug(f"File state: {file_info.state}, waiting...")
                 
                 if file_info.state != "ACTIVE":
-                    logger.warning(f"File not ready: {file_info.state}")
+                    raise TimeoutError(f"Video file not ready after {max_wait_time}s, state: {file_info.state}")
             
             # Create evaluation prompt
             prompt = self._create_evaluation_prompt(project_context)
