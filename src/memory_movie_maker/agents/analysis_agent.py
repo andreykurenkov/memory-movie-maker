@@ -107,8 +107,8 @@ class AnalysisAgent(Agent):
             all_tasks = visual_tasks + audio_tasks
             
             # Limit concurrent uploads to avoid bus errors with large files
-            # Use semaphore to limit to 2 concurrent uploads (safer for large files)
-            MAX_CONCURRENT_UPLOADS = 2
+            # Use semaphore to limit to 4 concurrent uploads (balanced speed/stability)
+            MAX_CONCURRENT_UPLOADS = 4
             semaphore = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
             completed_count = 0
             
