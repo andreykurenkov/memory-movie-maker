@@ -6,9 +6,11 @@ from typing import Dict, Any, List, Optional
 
 try:
     from google import genai
+    from google.genai import types
     GENAI_AVAILABLE = True
 except ImportError:
     GENAI_AVAILABLE = False
+    types = None
 
 try:
     from google.adk.tools import FunctionTool
@@ -29,18 +31,18 @@ logger = logging.getLogger(__name__)
 
 class EditPlanner:
     """Plans video edits using Gemini's intelligence."""
-    
+
     def __init__(self):
         """Initialize the edit planner."""
         if not GENAI_AVAILABLE:
             raise ImportError("google-genai package not available")
-        
+
         if not settings.gemini_api_key:
             raise ValueError("GEMINI_API_KEY not configured")
-        
+
         self._client = genai.Client(api_key=settings.gemini_api_key)
-        self._model_name = settings.get_gemini_model_name()
-        
+        self._model_name = settings.get_gemini_model_name(task="planning")
+
     async def plan_edit(
         self,
         media_assets: List[MediaAsset],
@@ -63,30 +65,37 @@ class EditPlanner:
             Complete edit plan with segments and creative reasoning
         """
         log_start(logger, f"Planning {target_duration}s edit with Gemini")
-        
+
         # Build the prompt
         prompt = self._build_edit_prompt(
             media_assets, music_profile, target_duration, user_prompt, style_preferences, music_asset
         )
-        
+
         # Call Gemini
         log_update(logger, "Asking Gemini to plan the edit...")
         response = await self._call_gemini(prompt)
-        
+
         # Parse the response
         log_update(logger, "Parsing edit plan...")
         edit_plan = self._parse_edit_plan(response)
-        
+
         # Log to AI output logger
         ai_logger.log_edit_plan(
             plan=edit_plan.dict() if hasattr(edit_plan, 'dict') else vars(edit_plan),
             prompt=prompt,  # Log full prompt
             raw_response=response
         )
-        
+
+        # Convert simple IDs back to original IDs
+        id_mapping = getattr(self, '_id_mapping', None)
+        if id_mapping:
+            for segment in edit_plan.segments:
+                if segment.media_id in id_mapping:
+                    segment.media_id = id_mapping[segment.media_id]
+
         log_complete(logger, f"Edit plan created with {len(edit_plan.segments)} segments")
         return edit_plan
-    
+
     def _build_edit_prompt(
         self,
         media_assets: List[MediaAsset],
@@ -97,113 +106,50 @@ class EditPlanner:
         music_asset: Optional[MediaAsset] = None
     ) -> str:
         """Build a detailed prompt for Gemini."""
-        
-        # Format media information (already sorted chronologically)
+
+        # Simplify media information - only include what's essential for editing decisions
         media_info = []
-        prev_timestamp = None
-        
+
         for i, asset in enumerate(media_assets):
+            # Use simple sequential IDs for easier reference
+            simple_id = f"m{i:03d}"  # m000, m001, etc.
+
             info = {
-                "id": asset.id,
+                "id": simple_id,
+                "original_id": asset.id,  # Keep mapping for execution
                 "type": asset.type,
-                "file": asset.file_path.split('/')[-1],
-                "file_path": asset.file_path,  # Full path for context
-                "chronological_index": i,  # Position in chronological order
+                "index": i,  # Chronological position
             }
-            
-            # Check if this is likely part of the same event as previous
-            if i > 0 and asset.metadata and media_assets[i-1].metadata:
-                curr_time = asset.metadata.get("chronological_order") or asset.metadata.get("recorded_at")
-                prev_time = media_assets[i-1].metadata.get("chronological_order") or media_assets[i-1].metadata.get("recorded_at")
-                
-                if curr_time and prev_time:
-                    # If timestamps are numeric (chronological_order)
-                    if isinstance(curr_time, (int, float)) and isinstance(prev_time, (int, float)):
-                        time_diff = curr_time - prev_time
-                        # If less than 5 minutes apart, likely same event
-                        if time_diff < 300:
-                            info["likely_same_event_as_previous"] = True
-                            info["seconds_after_previous"] = time_diff
-            
-            # Add important metadata
-            if asset.metadata:
-                if "duration" in asset.metadata:
-                    info["duration"] = asset.metadata["duration"]
-                if "width" in asset.metadata and "height" in asset.metadata:
-                    info["resolution"] = f"{asset.metadata['width']}x{asset.metadata['height']}"
-                if "recorded_at" in asset.metadata:
-                    info["recorded_at"] = asset.metadata["recorded_at"]
-                elif "modified_time" in asset.metadata:
-                    info["recorded_at"] = asset.metadata["modified_time"]  # Fallback
-                if "fps" in asset.metadata:
-                    info["fps"] = asset.metadata["fps"]
-            
-            # For videos, explicitly note the duration
-            if asset.type == "video" and asset.duration:
-                info["duration"] = asset.duration
-            
+
+            # Essential metadata only
+            if asset.type == "video":
+                info["duration"] = asset.duration or asset.metadata.get("duration", 0)
+
+            # Analysis results - only the most important fields
             if asset.gemini_analysis:
-                info["description"] = asset.gemini_analysis.description
-                info["aesthetic_score"] = asset.gemini_analysis.aesthetic_score
-                info["subjects"] = asset.gemini_analysis.main_subjects
-                info["tags"] = asset.gemini_analysis.tags
-                
+                info["description"] = asset.gemini_analysis.description[:100]  # Truncate long descriptions
+                info["quality"] = round(asset.gemini_analysis.aesthetic_score, 2)
+                info["subjects"] = asset.gemini_analysis.main_subjects[:3]  # Top 3 subjects only
+
                 if hasattr(asset.gemini_analysis, 'notable_segments') and asset.gemini_analysis.notable_segments:
-                    info["notable_segments"] = [
+                    # Only include the top 3 most important segments
+                    top_segments = sorted(
+                        asset.gemini_analysis.notable_segments,
+                        key=lambda s: s.importance,
+                        reverse=True
+                    )[:3]
+                    info["key_moments"] = [
                         {
                             "start": seg.start_time,
                             "end": seg.end_time,
-                            "description": seg.description,
-                            "visual_content": seg.visual_content,
-                            "audio_content": seg.audio_content,
-                            "audio_type": seg.audio_type,
-                            "speaker": seg.speaker,
-                            "speech_content": seg.speech_content,
-                            "music_description": seg.music_description,
-                            "emotional_tone": seg.emotional_tone,
-                            "importance": seg.importance,
-                            "sync_priority": seg.sync_priority,
-                            "recommended_action": seg.recommended_action,
-                            "tags": seg.tags
+                            "description": seg.description[:50],  # Brief description
+                            "importance": round(seg.importance, 2)
                         }
-                        for seg in asset.gemini_analysis.notable_segments
+                        for seg in top_segments
                     ]
-                
-                # Include audio summary if available
-                if hasattr(asset.gemini_analysis, 'audio_summary') and asset.gemini_analysis.audio_summary:
-                    audio_summary = asset.gemini_analysis.audio_summary
-                    info["audio_summary"] = {
-                        "has_speech": audio_summary.has_speech,
-                        "has_music": audio_summary.has_music,
-                        "dominant_audio": audio_summary.dominant_audio,
-                        "overall_mood": audio_summary.overall_audio_mood,
-                        "audio_quality": audio_summary.audio_quality,
-                        "key_moments": audio_summary.key_audio_moments
-                    }
-            
-            if asset.audio_analysis:
-                info["audio_mood"] = asset.audio_analysis.vibe.mood
-                info["tempo"] = asset.audio_analysis.tempo_bpm
-            
-            if asset.semantic_audio_analysis:
-                info["audio_content"] = asset.semantic_audio_analysis.get("summary", "")
-                # Include musical segments if available
-                if asset.semantic_audio_analysis.get("segments"):
-                    info["audio_segments"] = [
-                        {
-                            "start": seg.get("start_time", 0),
-                            "end": seg.get("end_time", 0),
-                            "type": seg.get("type", ""),
-                            "musical_structure": seg.get("musical_structure"),
-                            "energy_transition": seg.get("energy_transition"),
-                            "sync_priority": seg.get("sync_priority", 0.5)
-                        }
-                        for seg in asset.semantic_audio_analysis.get("segments", [])
-                        if seg.get("type") in ["music", "intro", "verse", "chorus", "bridge", "outro", "drop", "buildup"]
-                    ]
-                
+
             media_info.append(info)
-        
+
         # Format music information
         music_info = None
         if music_profile:
@@ -215,7 +161,7 @@ class EditPlanner:
                 "beat_count": len(music_profile.beat_timestamps),
                 "energy_curve_summary": self._summarize_energy_curve(music_profile.energy_curve)
             }
-            
+
             # Add detailed musical segmentation if available
             if music_asset and music_asset.semantic_audio_analysis:
                 semantic = music_asset.semantic_audio_analysis
@@ -223,7 +169,7 @@ class EditPlanner:
                 music_info["energy_peaks"] = semantic.get("energy_peaks", [])
                 music_info["recommended_cut_points"] = semantic.get("recommended_cut_points", [])
                 music_info["key_moments"] = semantic.get("key_moments", [])
-                
+
                 # Include musical segments
                 if semantic.get("segments"):
                     music_info["detailed_segments"] = [
@@ -239,26 +185,28 @@ class EditPlanner:
                         for seg in semantic.get("segments", [])
                         if seg.get("type") in ["music", "intro", "verse", "chorus", "bridge", "outro", "drop", "buildup"]
                     ]
-        
-        # Build the prompt with artistic direction
-        prompt = f"""You are a professional video editor creating a cohesive video from a collection of photos and videos. 
-The user has provided media from an event, trip, party, or personal collection that they want edited together into 
-a single video that captures and preserves the memories from this experience.
 
-USER REQUEST: {user_prompt}
-TARGET DURATION: {target_duration} seconds
+        # Create ID mapping for converting back to original IDs
+        id_mapping = {info["id"]: info["original_id"] for info in media_info}
+        self._id_mapping = id_mapping  # Store for later use in parse
 
-AVAILABLE MEDIA:
-{json.dumps(media_info, indent=2)}
+        # Build the prompt following Gemini best practices
+        prompt = f"""## Context
 
-{'MUSIC TRACK:' + json.dumps(music_info, indent=2) if music_info else 'NO MUSIC TRACK'}
+You are a professional video editor. The user has provided a collection of media files (photos and videos) from an event, trip, or personal experience. Your task is to create a detailed edit plan that selects and arranges these media files into a cohesive video.
 
-## Creative Guidelines
+## Requirements
+
+- **User Request**: {user_prompt}
+- **Target Duration**: {target_duration} seconds (your edit must be within 5 seconds of this)
+
+## Editing Guidelines
 
 ### Most Critical Rules
 • **Never repeat clips** - each media_id appears only once
+• **STRONGLY prefer videos over photos** - only use photos if no video coverage exists
 • **Match cuts to music** beats/energy when music is present  
-• **Prioritize quality** - use clips with aesthetic_score > 0.7
+• **Prioritize quality** - use clips with quality score > 0.7
 
 ### Shot Duration
 • Quick cuts: 0.5-2s (energy, montages)
@@ -279,12 +227,13 @@ AVAILABLE MEDIA:
 • End with something memorable
 
 ### Handling Redundant Media
-• Media files are sorted chronologically (see chronological_index)
+• Media files are sorted chronologically (see index field)
 • Multiple files with similar timestamps often show the same moment from different angles
 • When you have duplicate coverage:
   - Choose only the BEST angle/quality
-  - Prefer video over photos of the same moment
+  - **ALWAYS prefer video over photos** of the same moment
   - It's perfectly fine to skip redundant media
+• Photos should only be used when there's NO video coverage of that part of the event
 • Maintain temporal flow for events unless artistic reasons dictate otherwise
 
 ### Transition Discipline
@@ -326,6 +275,26 @@ Consider preserving original audio when:
 • Video contains important dialogue or narration
 • Ambient sounds enhance atmosphere (waves, laughter)
 • Sound effects add impact (applause, etc.)
+
+
+## Available Media
+
+The media files are already sorted chronologically. Each file has:
+- **id**: Simple reference ID (m000, m001, etc.) 
+- **type**: "image" or "video"
+- **quality**: Aesthetic score from 0-1 (higher is better)
+- **duration**: For videos, length in seconds
+- **description**: Brief content description
+
+**Important**: Videos are strongly preferred over photos. Only use photos when no suitable video exists for that moment.
+
+```json
+{json.dumps(media_info, indent=2)}
+```
+
+{('## Music Track' + chr(10) + chr(10) + '```json' + chr(10) + json.dumps(music_info, indent=2) + chr(10) + '```') if music_info else '## Note: No Music Track Provided'}
+
+# Output Format
 
 Return a complete edit plan as JSON:
 {{
@@ -369,56 +338,88 @@ QUALITY CHECKLIST:
 ✓ Music and visuals are perfectly synchronized
 ✓ Pacing creates and releases tension appropriately
 ✓ Ending provides satisfying closure
-✓ Overall feels broadcast/commercial quality"""
+✓ Overall feels broadcast/commercial quality
+
+## Your Task
+
+Analyze the available media files and create a detailed edit plan that:
+1. Selects the best clips (strongly preferring videos over photos)
+2. Arranges them in an engaging sequence
+3. Matches the user's request and target duration
+4. Returns a valid JSON object with all required fields
+
+Create the edit plan now."""
 
         return prompt
-    
+
     def _summarize_energy_curve(self, energy_curve: List[float]) -> str:
         """Summarize the energy curve for the prompt."""
         if not energy_curve:
             return "No energy data"
-        
+
         # Find peaks and valleys
         avg_energy = sum(energy_curve) / len(energy_curve)
         high_energy_times = []
         low_energy_times = []
-        
+
         samples_per_second = len(energy_curve) / 60  # Rough estimate
-        
+
         for i, energy in enumerate(energy_curve):
             time = i / samples_per_second
             if energy > avg_energy * 1.3:
                 high_energy_times.append(f"{time:.1f}s")
             elif energy < avg_energy * 0.7:
                 low_energy_times.append(f"{time:.1f}s")
-        
+
         return f"High energy at: {', '.join(high_energy_times[:5])}... Low energy at: {', '.join(low_energy_times[:5])}..."
-    
+
     async def _call_gemini(self, prompt: str) -> str:
-        """Call Gemini API with the edit planning prompt."""
+        """Call Gemini API with the edit planning prompt.
+        
+        Uses thinking config to allow the model to reason through the edit plan
+        with up to 2000 tokens of internal thinking before generating the response.
+        """
         try:
-            response = self._client.models.generate_content(
-                model=self._model_name,
-                contents=prompt
-            )
+            # Create config with thinking enabled for better reasoning
+            config = types.GenerateContentConfig(
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=10000  # Allow up to 2k tokens for thinking
+                )
+            ) if types else None
+            
+            # Call with thinking config if available
+            if config:
+                logger.info("Using thinking config with 2k token budget for edit planning")
+                response = self._client.models.generate_content(
+                    model=self._model_name,
+                    contents=prompt,
+                    config=config
+                )
+            else:
+                # Fallback without thinking config
+                response = self._client.models.generate_content(
+                    model=self._model_name,
+                    contents=prompt
+                )
+            
             return response.text
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
             raise
-    
+
     def _parse_edit_plan(self, response: str) -> EditPlan:
         """Parse Gemini's response into EditPlan object."""
         try:
             # Extract JSON from response
             json_start = response.find('{')
             json_end = response.rfind('}') + 1
-            
+
             if json_start == -1 or json_end == 0:
                 raise ValueError("No JSON object found in response")
-            
+
             json_str = response[json_start:json_end]
             plan_data = json.loads(json_str)
-            
+
             # Convert segments to PlannedSegment objects
             segments = []
             for i, seg_data in enumerate(plan_data.get("segments", [])):
@@ -438,14 +439,14 @@ QUALITY CHECKLIST:
                     audio_reasoning=seg_data.get("audio_reasoning")
                 )
                 segments.append(segment)
-                
+
                 # Log the reasoning
                 if segment.reasoning:
                     log_update(logger, f"Segment {i+1}: {segment.reasoning[:60]}...")
-            
+
             # Calculate actual total duration from segments
             actual_duration = sum(s.duration for s in segments)
-            
+
             # Create EditPlan
             edit_plan = EditPlan(
                 segments=segments,
@@ -458,13 +459,13 @@ QUALITY CHECKLIST:
                 technical_quality=float(plan_data.get("technical_quality", 0.5)),
                 reasoning_summary=plan_data.get("reasoning_summary", "No summary provided")
             )
-            
+
             # Log the creative overview
             log_update(logger, f"Narrative: {edit_plan.narrative_structure[:80]}...")
             log_update(logger, f"Variety score: {edit_plan.variety_score:.2f}, Coherence: {edit_plan.story_coherence:.2f}")
-            
+
             return edit_plan
-            
+
         except Exception as e:
             logger.error(f"Failed to parse edit plan: {e}")
             logger.debug(f"Response: {response}")

@@ -38,7 +38,7 @@ class AnalysisAgent(Agent):
         
         super().__init__(
             name="AnalysisAgent",
-            model=settings.get_gemini_model_name(),
+            model=settings.get_gemini_model_name(task="analysis"),
             description="Analyzes media files for visual and audio content",
             instruction="""You are an expert media analyst. Your job is to:
             1. Analyze all media files provided

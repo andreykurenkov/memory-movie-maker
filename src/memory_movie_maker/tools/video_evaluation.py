@@ -30,7 +30,7 @@ class VideoEvaluator:
         Args:
             model_name: Gemini model to use (defaults to config)
         """
-        self._model_name = model_name or settings.get_gemini_model_name()
+        self._model_name = model_name or settings.get_gemini_model_name(task="analysis")
         self._client = genai.Client(api_key=settings.gemini_api_key)
     
     async def evaluate_video(

@@ -66,7 +66,7 @@ class SemanticAudioAnalysisTool:
         """
         self.storage = storage
         self._client = genai.Client(api_key=settings.gemini_api_key)
-        self._model_name = settings.get_gemini_model_name()
+        self._model_name = settings.get_gemini_model_name(task="analysis")
         
     async def analyze_audio_semantics(self, audio_path: str) -> SemanticAudioAnalysis:
         """Analyze audio for semantic content and meaning.

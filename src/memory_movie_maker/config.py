@@ -41,9 +41,25 @@ class Settings(BaseSettings):
         extra="ignore",  # Ignore extra fields in .env file
     )
     
-    def get_gemini_model_name(self) -> str:
-        """Get the Gemini model name based on configuration."""
-        return "gemini-2.0-flash"
+    def get_gemini_model_name(self, task: str = "default") -> str:
+        """Get the appropriate Gemini model name based on the task.
+        
+        Args:
+            task: The type of task - "analysis", "planning", or "default"
+            
+        Returns:
+            Model name string
+        """
+        # Use different models for different tasks
+        if task == "analysis":
+            # Fast model for video/image analysis
+            return "gemini-2.5-flash"
+        elif task == "planning":
+            # Powerful model for creative edit planning
+            return "gemini-2.5-pro"
+        else:
+            # Default to fast model
+            return "gemini-2.5-flash"
     
     def validate_api_keys(self) -> bool:
         """Check if required API keys are configured."""

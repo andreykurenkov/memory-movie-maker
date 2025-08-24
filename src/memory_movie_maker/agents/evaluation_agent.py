@@ -20,7 +20,7 @@ class EvaluationAgent(Agent):
         """Initialize evaluation agent."""
         super().__init__(
             name="EvaluationAgent",
-            model=settings.get_gemini_model_name(),
+            model=settings.get_gemini_model_name(task="analysis"),
             description="Evaluates video quality and provides improvement suggestions",
             instruction="""You are an expert video editor evaluating automatically generated videos.
             The videos are created from collections of photos/videos from events, trips, or personal memories.

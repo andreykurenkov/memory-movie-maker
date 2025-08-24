@@ -20,7 +20,7 @@ class RefinementAgent(Agent):
         """Initialize refinement agent."""
         super().__init__(
             name="RefinementAgent",
-            model=settings.get_gemini_model_name(),
+            model=settings.get_gemini_model_name(task="planning"),
             description="Parses feedback and creates actionable edit commands",
             instruction="""You are an expert at understanding video editing feedback and 
             translating it into specific, actionable commands. Your responsibilities:

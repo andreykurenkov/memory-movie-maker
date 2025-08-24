@@ -243,11 +243,8 @@ class AIOutputLogger:
                 if 'prompt' in entry and entry['prompt']:
                     report.append("\nPROMPT SENT TO LLM:")
                     report.append("-" * 40)
-                    # Show first 1000 chars of prompt
-                    prompt_preview = entry['prompt'][:1000]
-                    if len(entry['prompt']) > 1000:
-                        prompt_preview += "\n... [truncated for display, full prompt saved]"
-                    report.append(prompt_preview)
+                    # Include FULL prompt without truncation
+                    report.append(entry['prompt'])
                     report.append("-" * 40)
                     report.append("")
                 if 'analysis' in entry and entry['analysis']:
@@ -293,11 +290,8 @@ class AIOutputLogger:
                 if 'prompt' in entry and entry['prompt']:
                     report.append("\nPROMPT SENT TO LLM:")
                     report.append("-" * 40)
-                    # Show first 1500 chars of prompt (semantic audio prompts are medium length)
-                    prompt_preview = entry['prompt'][:1500]
-                    if len(entry['prompt']) > 1500:
-                        prompt_preview += "\n... [truncated for display, full prompt saved]"
-                    report.append(prompt_preview)
+                    # Include FULL prompt without truncation
+                    report.append(entry['prompt'])
                     report.append("-" * 40)
                     report.append("")
                     
@@ -329,11 +323,8 @@ class AIOutputLogger:
                 if 'prompt' in entry and entry['prompt']:
                     report.append("\nPROMPT SENT TO LLM:")
                     report.append("-" * 40)
-                    # Show first 2000 chars of prompt (edit prompts are longer)
-                    prompt_preview = entry['prompt'][:2000]
-                    if len(entry['prompt']) > 2000:
-                        prompt_preview += "\n... [truncated for display, full prompt saved]"
-                    report.append(prompt_preview)
+                    # Include FULL prompt without truncation
+                    report.append(entry['prompt'])
                     report.append("-" * 40)
                     report.append("")
                     

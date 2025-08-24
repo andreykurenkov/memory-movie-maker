@@ -36,7 +36,7 @@ class CompositionAgent(Agent):
         
         super().__init__(
             name="CompositionAgent",
-            model=settings.get_gemini_model_name(),
+            model=settings.get_gemini_model_name(task="planning"),
             description="Creates intelligent video edits using AI planning and renders final videos",
             instruction="""You are an award-winning video editor using AI to create compelling memory movies.
 
@@ -81,7 +81,7 @@ class CompositionAgent(Agent):
     async def create_memory_movie(
         self,
         project_state: ProjectState,
-        target_duration: int = 60,
+        target_duration: int = None,
         style: str = "auto",
         preview_only: bool = False
     ) -> ProjectState:
@@ -89,7 +89,7 @@ class CompositionAgent(Agent):
         
         Args:
             project_state: Current project state with analyzed media
-            target_duration: Target video duration in seconds
+            target_duration: Target video duration in seconds (uses project state if not specified)
             style: Video style (auto, smooth, dynamic, fast)
             preview_only: If True, only render preview quality
             
@@ -97,6 +97,10 @@ class CompositionAgent(Agent):
             Updated project state with timeline and rendered output
         """
         try:
+            # Use target duration from project state if not explicitly provided
+            if target_duration is None:
+                target_duration = project_state.user_inputs.target_duration
+            
             log_start(logger, f"Creating memory movie: {target_duration}s, style={style}")
             
             # Validate we have analyzed media

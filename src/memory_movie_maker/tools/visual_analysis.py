@@ -66,14 +66,14 @@ class VisualAnalysisTool:
                 project=settings.google_cloud_project,
                 location=settings.google_cloud_location
             )
-            self._model = GenerativeModel(settings.get_gemini_model_name())
+            self._model = GenerativeModel(settings.get_gemini_model_name(task="analysis"))
             self._api_type = "vertex"
             log_complete(logger, f"Initialized Gemini via Vertex AI (project: {settings.google_cloud_project})")
         
         elif settings.gemini_api_key and GENAI_AVAILABLE:
             # Use direct Gemini API with new SDK
             self._client = genai.Client(api_key=settings.gemini_api_key)
-            self._model_name = settings.get_gemini_model_name()
+            self._model_name = settings.get_gemini_model_name(task="analysis")
             self._api_type = "genai"
             log_complete(logger, f"Initialized Gemini via direct API using model: {self._model_name}")
         
