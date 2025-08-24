@@ -48,6 +48,10 @@ class TimelineSegment(BaseModel):
     speed_factor: float = Field(1.0, gt=0, le=10.0, description="Playback speed multiplier")
     volume: float = Field(1.0, ge=0, le=2.0, description="Audio volume adjustment")
     
+    # Audio mixing settings (for video clips with original audio)
+    preserve_original_audio: bool = Field(False, description="Keep original audio from video clip")
+    original_audio_volume: float = Field(0.1, ge=0, le=1.0, description="Original audio mix level (0.8+ = dominant, 0.1-0.2 = background)")
+    
     # Layout (for multi-clip compositions)
     position: Optional[Dict[str, float]] = Field(None, description="Position override (x, y)")
     scale: float = Field(1.0, gt=0, le=10.0, description="Scale factor")

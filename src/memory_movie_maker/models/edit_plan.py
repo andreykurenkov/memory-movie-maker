@@ -23,6 +23,11 @@ class PlannedSegment(BaseModel):
     transition_type: str = Field("crossfade", description="Transition from previous clip")
     effect_suggestions: List[str] = Field(default_factory=list, description="Suggested effects")
     
+    # Audio mixing decisions
+    preserve_original_audio: bool = Field(False, description="Whether to keep audio from video clip")
+    original_audio_volume: float = Field(0.1, ge=0, le=1, description="Volume level for original audio (0.8+ = dominant, 0.1-0.2 = background)")
+    audio_reasoning: Optional[str] = Field(None, description="Why this audio decision was made")
+    
     # AI reasoning
     reasoning: str = Field(..., description="Why this clip was chosen for this moment")
     story_beat: Optional[str] = Field(None, description="Narrative purpose (intro, development, climax, etc.)")
@@ -59,7 +64,7 @@ class EditPlan(BaseModel):
     technical_quality: float = Field(..., ge=0, le=1, description="Average quality of selected clips")
     
     # Metadata
-    created_by: str = Field("gemini-2.0-flash", description="Model that created the plan")
+    created_by: str = Field("ai-model", description="Model that created the plan")
     reasoning_summary: str = Field(..., description="Overall reasoning for the edit")
     
     @validator('total_duration')

@@ -162,7 +162,7 @@ class CompositionAlgorithm:
                 # Use aesthetic score as proxy for energy
                 energy_scores.append(media.gemini_analysis.aesthetic_score)
         
-        return sum(energy_scores) / len(energy_scores) if energy_scores else 0.5
+        return sum(energy_scores) / len(energy_scores) if energy_scores and len(energy_scores) > 0 else 0.5
     
     def _create_beat_synced_segments(
         self,
@@ -269,9 +269,7 @@ class CompositionAlgorithm:
         """Create a timeline segment from a media asset."""
         effects = []
         
-        # Add Ken Burns effect for photos
-        if media.type == MediaType.IMAGE:
-            effects.append("ken_burns")
+        # Note: Ken Burns effect removed (was not implemented)
         
         # Determine if we need to trim video
         trim_start = 0.0
@@ -305,23 +303,28 @@ class CompositionAlgorithm:
         segments: List[TimelineSegment],
         style_preferences: Dict[str, Any]
     ) -> List[TimelineSegment]:
-        """Apply transitions between segments."""
-        transition_style = style_preferences.get("transition_style", "smooth")
+        """Apply transitions between segments when no edit plan specifies them."""
+        transition_style = style_preferences.get("transition_style", "cut")
         
         for i, segment in enumerate(segments[:-1]):
-            if transition_style == "smooth":
-                segment.transition_out = TransitionType.CROSSFADE
-            elif transition_style == "dynamic":
-                # Alternate between different transitions
-                transitions = [
-                    TransitionType.CROSSFADE,
-                    TransitionType.FADE_TO_BLACK,
-                    TransitionType.SLIDE_LEFT,
-                    TransitionType.SLIDE_RIGHT
-                ]
-                segment.transition_out = transitions[i % len(transitions)]
-            else:
-                segment.transition_out = TransitionType.CUT
+            # Only set transition if not already set
+            if segment.transition_out == TransitionType.CUT:
+                if transition_style == "smooth":
+                    # Occasional fades for smooth style, mostly cuts
+                    if i % 4 == 3:  # Every 4th transition is a fade
+                        segment.transition_out = TransitionType.FADE
+                    else:
+                        segment.transition_out = TransitionType.CUT
+                elif transition_style == "dynamic":
+                    # Mostly cuts with occasional special transitions
+                    if i % 5 == 4:  # Every 5th transition is special
+                        transitions = [TransitionType.FADE, TransitionType.CROSSFADE]
+                        segment.transition_out = transitions[i % len(transitions)]
+                    else:
+                        segment.transition_out = TransitionType.CUT
+                else:
+                    # Default to cuts
+                    segment.transition_out = TransitionType.CUT
         
         return segments
 
@@ -371,6 +374,12 @@ async def compose_timeline(
             
             media = media_lookup[planned_seg.media_id]
             
+            # Map transition type string to enum
+            try:
+                transition_type = TransitionType[planned_seg.transition_type.upper()]
+            except (KeyError, AttributeError):
+                transition_type = TransitionType.CUT  # Default to cut if invalid
+            
             # Create timeline segment
             segment = TimelineSegment(
                 media_asset_id=planned_seg.media_id,
@@ -379,24 +388,26 @@ async def compose_timeline(
                 duration=planned_seg.duration,
                 in_point=planned_seg.trim_start,
                 out_point=planned_seg.trim_end,
-                transition_in=TransitionType.CUT if planned_seg.start_time == 0 else TransitionType[planned_seg.transition_type.upper()],
-                transition_out=TransitionType.CUT,  # Will be set by transitions
-                effects=planned_seg.effect_suggestions if planned_seg.effect_suggestions else []
+                transition_in=TransitionType.CUT if planned_seg.start_time == 0 else transition_type,
+                transition_out=transition_type,  # Use the transition from the edit plan
+                effects=planned_seg.effect_suggestions if planned_seg.effect_suggestions else [],
+                preserve_original_audio=planned_seg.preserve_original_audio,
+                original_audio_volume=planned_seg.original_audio_volume
             )
             
-            # Add Ken Burns effect for photos
-            if media.type == MediaType.IMAGE and "ken_burns" not in segment.effects:
-                segment.effects.append("ken_burns")
+            # Note: Ken Burns effect removed (was not implemented)
             
             segments.append(segment)
             log_update(logger, f"Added segment: {media.file_path.split('/')[-1]} ({planned_seg.duration:.1f}s)")
         
-        # Apply transitions based on style
-        style_prefs = {
-            "transition_style": "smooth" if style == "smooth" else "dynamic"
-        }
-        algorithm = CompositionAlgorithm()
-        segments = algorithm._apply_transitions(segments, style_prefs)
+        # Don't override transitions - the edit plan already specified them
+        # Only apply transitions if no edit plan was provided (backward compatibility)
+        if not edit_plan:
+            style_prefs = {
+                "transition_style": "smooth" if style == "smooth" else "dynamic"
+            }
+            algorithm = CompositionAlgorithm()
+            segments = algorithm._apply_transitions(segments, style_prefs)
         
         # Create timeline with correct total duration
         actual_duration = segments[-1].end_time if segments else 0.0

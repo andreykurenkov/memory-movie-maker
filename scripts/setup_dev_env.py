@@ -179,11 +179,6 @@ try:
 except ImportError:
     print("⚠️  MoviePy not available (video processing)")
 
-try:
-    import gradio
-    print("✓ Gradio available")
-except ImportError:
-    print("⚠️  Gradio not available (web interface)")
 """
     
     return run_command(f"{sys.executable} -c '{test_code}'")

@@ -13,8 +13,7 @@ class Settings(BaseSettings):
     google_genai_use_vertexai: bool = True
     gemini_api_key: Optional[str] = None
     
-    # Storage configuration
-    storage_type: str = "filesystem"
+    # Storage configuration (simplified - filesystem only)
     storage_path: str = "./data"
     max_file_size: int = 500 * 1024 * 1024  # 500MB
     max_project_size: int = 5 * 1024 * 1024 * 1024  # 5GB
@@ -29,10 +28,6 @@ class Settings(BaseSettings):
     default_video_fps: int = 30
     default_video_codec: str = "libx264"
     default_audio_codec: str = "aac"
-    
-    # Server configuration
-    host: str = "127.0.0.1"
-    port: int = 7860
     
     # Development
     debug: bool = False

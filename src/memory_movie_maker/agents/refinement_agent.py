@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, List
 from google.adk.agents import Agent
 
 from ..tools.refinement_parser import parse_refinements_tool, parse_user_request_tool
+from ..config import settings
 from ..models.project_state import ProjectState
 
 
@@ -19,7 +20,7 @@ class RefinementAgent(Agent):
         """Initialize refinement agent."""
         super().__init__(
             name="RefinementAgent",
-            model="gemini-2.0-flash",
+            model=settings.get_gemini_model_name(),
             description="Parses feedback and creates actionable edit commands",
             instruction="""You are an expert at understanding video editing feedback and 
             translating it into specific, actionable commands. Your responsibilities:

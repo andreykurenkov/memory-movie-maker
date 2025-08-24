@@ -75,6 +75,9 @@ class GeminiAnalysis(BaseModel):
     
     # Audio summary for videos
     audio_summary: Optional[AudioSummary] = Field(None, description="Summary of audio content in video")
+    
+    # LLM prompt used (excluded from serialization for LLM inputs)
+    llm_prompt: Optional[str] = Field(None, exclude=True, description="Prompt sent to LLM")
 
 
 class AudioVibe(BaseModel):

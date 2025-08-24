@@ -4,6 +4,7 @@ import logging
 from typing import Dict, Any, Optional, List
 
 from google.adk.agents import Agent
+from ..config import settings
 
 from ..tools.video_evaluation import evaluate_video_tool
 from ..models.project_state import ProjectState
@@ -19,20 +20,23 @@ class EvaluationAgent(Agent):
         """Initialize evaluation agent."""
         super().__init__(
             name="EvaluationAgent",
-            model="gemini-2.0-flash",
+            model=settings.get_gemini_model_name(),
             description="Evaluates video quality and provides improvement suggestions",
-            instruction="""You are an expert video critic and editor. Your responsibilities:
+            instruction="""You are an expert video editor evaluating automatically generated videos.
+            The videos are created from collections of photos/videos from events, trips, or personal memories.
+            
+            Your responsibilities:
             1. Evaluate rendered videos for quality and effectiveness
             2. Identify technical issues (sync, transitions, quality)
-            3. Assess creative aspects (pacing, storytelling, emotion)
+            3. Assess creative aspects (pacing, flow, coherence)
             4. Provide specific, actionable feedback
             5. Recommend whether to accept, adjust, or rework
             
             Evaluation criteria:
             - Music synchronization and rhythm
-            - Visual flow and storytelling
+            - Visual flow and coherence
             - Technical quality (resolution, smoothness)
-            - Emotional impact and engagement
+            - Overall cohesiveness and watchability
             - Adherence to user's original request
             
             Always provide:
@@ -62,8 +66,11 @@ class EvaluationAgent(Agent):
         try:
             logger.info("Starting video evaluation...")
             
-            # Run evaluation
-            result = await evaluate_video_tool.run(
+            # Import the actual function, not the tool wrapper
+            from ..tools.video_evaluation import evaluate_video
+            
+            # Run evaluation using the actual function
+            result = await evaluate_video(
                 project_state=project_state.model_dump(),
                 video_path=video_path
             )

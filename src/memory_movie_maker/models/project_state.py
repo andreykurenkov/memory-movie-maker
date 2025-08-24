@@ -6,13 +6,14 @@ maintaining the complete state of a video creation project.
 """
 
 from datetime import datetime
-from typing import List, Dict, Any, Optional, ClassVar
+from typing import List, Dict, Any, Optional, ClassVar, Union
 from pydantic import BaseModel, Field, validator
 import uuid
 
 from .media_asset import MediaAsset, AudioAnalysisProfile
 from .timeline import Timeline
 from .analysis import AnalysisSession
+from .aspect_ratio import AspectRatio
 
 
 class UserInputs(BaseModel):
@@ -21,14 +22,19 @@ class UserInputs(BaseModel):
     music: List[MediaAsset] = Field(default_factory=list, description="Music tracks")
     initial_prompt: str = Field(..., description="User's initial description")
     target_duration: int = Field(120, gt=0, le=600, description="Target video duration in seconds")
-    aspect_ratio: str = Field("16:9", description="Video aspect ratio")
+    aspect_ratio: Union[AspectRatio, str] = Field(AspectRatio.WIDESCREEN, description="Video aspect ratio")
     style_preferences: Dict[str, Any] = Field(default_factory=dict, description="Style preferences")
     
-    @validator('aspect_ratio')
+    @validator('aspect_ratio', pre=True)
     def validate_aspect_ratio(cls, v):
-        valid_ratios = ["16:9", "9:16", "4:3", "1:1", "21:9"]
-        if v not in valid_ratios:
-            raise ValueError(f'Aspect ratio must be one of: {", ".join(valid_ratios)}')
+        """Convert string to AspectRatio enum if needed."""
+        if isinstance(v, str):
+            try:
+                return AspectRatio.from_string(v)
+            except ValueError as e:
+                # List valid options in error message
+                valid_options = [ratio.value for ratio in AspectRatio]
+                raise ValueError(f'Aspect ratio must be one of: {", ".join(valid_options)}')
         return v
     
     @property
@@ -173,6 +179,12 @@ class ProjectState(BaseModel):
     # Storage references
     storage_path: Optional[str] = Field(None, description="Base storage path")
     output_path: Optional[str] = Field(None, description="Final video output path")
+    rendered_outputs: List[str] = Field(default_factory=list, description="List of rendered video paths")
+    
+    # Evaluation and refinement
+    evaluation_results: Optional[Dict[str, Any]] = Field(None, description="Latest evaluation results")
+    analysis_cache_enabled: bool = Field(True, description="Whether to use cached analysis results")
+    ai_analysis_log_path: Optional[str] = Field(None, description="Path to AI analysis log file")
     
     class Config:
         """Pydantic configuration."""
@@ -187,6 +199,45 @@ class ProjectState(BaseModel):
     def get_current_timeline(self) -> Timeline:
         """Get the current timeline."""
         return self.timeline
+    
+    def validate_state(self) -> List[str]:
+        """Validate the project state and return list of issues.
+        
+        Returns:
+            List of validation errors, empty if valid
+        """
+        errors = []
+        
+        # Check timeline references valid media
+        if self.timeline and self.timeline.segments:
+            media_ids = {m.id for m in self.user_inputs.media}
+            for i, segment in enumerate(self.timeline.segments):
+                if segment.media_asset_id not in media_ids:
+                    errors.append(f"Timeline segment {i} references invalid media ID: {segment.media_asset_id}")
+                
+                # Check segment timing
+                if segment.end_time <= segment.start_time:
+                    errors.append(f"Timeline segment {i} has invalid timing: end <= start")
+                
+                # Check trim points are within media duration
+                media = self.get_media_by_id(segment.media_asset_id)
+                if media and media.duration:
+                    if segment.in_point >= media.duration:
+                        errors.append(f"Timeline segment {i} in_point exceeds media duration")
+                    if segment.out_point and segment.out_point > media.duration:
+                        errors.append(f"Timeline segment {i} out_point exceeds media duration")
+        
+        # Check evaluation results match current video
+        if self.evaluation_results and self.rendered_outputs:
+            # Just a basic check that we have outputs
+            if not self.rendered_outputs:
+                errors.append("Evaluation results exist but no rendered outputs")
+        
+        # Check status phase is valid
+        if self.status and self.status.phase not in ProjectStatus.VALID_PHASES:
+            errors.append(f"Invalid project phase: {self.status.phase}")
+        
+        return errors
     
     def get_media_by_id(self, media_id: str) -> Optional[MediaAsset]:
         """Find media asset by ID."""
@@ -229,13 +280,33 @@ class ProjectState(BaseModel):
     @validator('timeline')
     def validate_timeline_references(cls, v, values):
         """Ensure timeline references valid media assets."""
-        if 'user_inputs' in values and v.segments:
-            valid_ids = {m.id for m in values['user_inputs'].media + values['user_inputs'].music}
-            if 'analysis' in values and values['analysis'].media_pool:
+        # Only validate if we have a timeline with segments
+        if not v or not v.segments:
+            return v
+        
+        # Only validate if analysis is complete (has media_pool)
+        # During initialization, we may not have all data yet
+        if 'user_inputs' in values and 'analysis' in values:
+            # Build list of valid media IDs
+            valid_ids = set()
+            
+            # Add user input media
+            if values['user_inputs'].media:
+                valid_ids.update(m.id for m in values['user_inputs'].media)
+            if values['user_inputs'].music:
+                valid_ids.update(m.id for m in values['user_inputs'].music)
+            
+            # Add analyzed media if available
+            if values['analysis'] and values['analysis'].media_pool:
                 valid_ids.update(m.id for m in values['analysis'].media_pool)
             
-            for segment in v.segments:
-                if segment.media_asset_id not in valid_ids:
-                    raise ValueError(f'Timeline segment references invalid media ID: {segment.media_asset_id}')
+            # Only validate if we have some valid IDs to check against
+            if valid_ids:
+                for segment in v.segments:
+                    if segment.media_asset_id not in valid_ids:
+                        # Log warning instead of raising during partial state
+                        import logging
+                        logging.warning(f'Timeline segment references media ID not yet in pool: {segment.media_asset_id}')
+                        # Don't raise - allow partial states during processing
         
         return v

@@ -28,7 +28,7 @@ class RefinementParser:
         }
         
         self.effect_keywords = {
-            "ken burns": "ken_burns",
+            # "ken burns": "ken_burns",  # Removed - not implemented
             "zoom": "zoom",
             "pan": "pan",
             "slow motion": "slow_motion",

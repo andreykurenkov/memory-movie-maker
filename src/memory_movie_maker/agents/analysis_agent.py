@@ -13,6 +13,7 @@ from ..tools.semantic_audio_analysis import semantic_audio_analysis_tool
 from ..models.project_state import ProjectState
 from ..models.media_asset import MediaAsset, MediaType
 from ..storage.interface import StorageInterface
+from ..config import settings
 from ..storage.filesystem import FilesystemStorage
 from ..utils.simple_logger import log_start, log_update, log_complete
 
@@ -37,7 +38,7 @@ class AnalysisAgent(Agent):
         
         super().__init__(
             name="AnalysisAgent",
-            model="gemini-2.0-flash",
+            model=settings.get_gemini_model_name(),
             description="Analyzes media files for visual and audio content",
             instruction="""You are an expert media analyst. Your job is to:
             1. Analyze all media files provided
@@ -104,19 +105,34 @@ class AnalysisAgent(Agent):
             log_update(logger, f"Running {len(visual_tasks)} visual and {len(audio_tasks)} audio analyses concurrently...")
             
             all_tasks = visual_tasks + audio_tasks
-            results = await asyncio.gather(*all_tasks, return_exceptions=True)
             
-            # Log any errors
-            error_count = 0
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    error_count += 1
-                    logger.error(f"Analysis task {i} failed: {result}")
+            # Run tasks and collect both results and exceptions
+            errors = []
+            successful = 0
             
-            if error_count == 0:
+            # Use gather without return_exceptions to properly propagate critical errors
+            try:
+                results = await asyncio.gather(*all_tasks)
+                successful = len(results)
                 log_update(logger, f"All {len(all_tasks)} analysis tasks completed successfully")
-            else:
-                logger.warning(f"{error_count} out of {len(all_tasks)} tasks failed")
+            except Exception as e:
+                # If gather fails, try to complete remaining tasks individually
+                logger.error(f"Batch analysis failed: {e}")
+                
+                # Run tasks individually to identify which ones fail
+                for i, task in enumerate(all_tasks):
+                    try:
+                        await task
+                        successful += 1
+                    except Exception as task_error:
+                        errors.append((i, task_error))
+                        logger.error(f"Analysis task {i} failed: {task_error}")
+                
+                if errors:
+                    logger.warning(f"{len(errors)} out of {len(all_tasks)} tasks failed")
+                    # Don't fail completely if some analyses succeed
+                    if successful == 0:
+                        raise Exception(f"All {len(all_tasks)} analysis tasks failed")
         
         # Update project phase
         if project_state.status.phase == "analyzing":

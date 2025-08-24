@@ -13,6 +13,7 @@ from moviepy.editor import (
 from moviepy.video.fx import resize
 from moviepy.video.fx.fadein import fadein
 from moviepy.video.fx.fadeout import fadeout
+from moviepy.video import fx as vfx
 
 from ..models.timeline import Timeline, TimelineSegment, TransitionType
 from ..models.media_asset import MediaAsset, MediaType
@@ -39,8 +40,12 @@ class VideoRenderer:
         global _renderer_storage
         _renderer_storage = storage or FilesystemStorage(base_path="./data")
         self.storage = _renderer_storage
-        self.default_resolution = (1920, 1080)
-        self.fps = 30
+        # Professional video settings
+        self.default_resolution = (1920, 1080)  # Full HD by default
+        self.fps = 30  # Standard frame rate for smooth motion
+        self.bitrate = "10M"  # High quality bitrate for crisp video
+        self.preserve_original_audio = True  # Keep audio from video clips by default
+        self.audio_mix_ratio = 0.8  # When mixing with music, original audio at 80% volume (dominant)
     
     async def render_video(
         self,
@@ -66,31 +71,50 @@ class VideoRenderer:
         
         if preview_mode:
             # Lower resolution for faster preview
-            resolution = (640, 360)
-            self.fps = 15
+            resolution = (1280, 720)  # HD preview (better than 360p)
+            self.fps = 24  # Use 24fps for preview (cinematic but faster than 30)
+            bitrate = "4M"
+        else:
+            bitrate = self.bitrate  # Use high quality for final render
+        
+        clips = []
+        final_clips = []
+        video = None
+        all_clips_to_cleanup = []  # Track ALL clips for cleanup
         
         try:
             # Create clips for each segment
-            clips = []
             for segment in timeline.segments:
                 clip = await self._create_clip_from_segment(
                     segment, media_assets, resolution
                 )
                 if clip:
                     clips.append(clip)
+                    all_clips_to_cleanup.append(clip)
             
             if not clips:
                 raise ValueError("No valid clips created from timeline")
             
-            # Apply transitions
+            # Apply transitions (may create additional clips)
             final_clips = self._apply_transitions(clips, timeline.segments)
+            
+            # Track any new clips created by transitions
+            for clip in final_clips:
+                if clip not in all_clips_to_cleanup:
+                    all_clips_to_cleanup.append(clip)
             
             # Concatenate all clips
             video = concatenate_videoclips(final_clips, method="compose")
             
             # Add audio track if specified
             if timeline.music_track_id:
-                video = self._add_audio_track(video, timeline.music_track_id)
+                video = self._add_audio_track(video, timeline.music_track_id, timeline)
+            else:
+                # No background music, but we might have original audio from clips
+                if video.audio is not None:
+                    logger.info("No background music provided, using original audio from video clips")
+                else:
+                    logger.info("No background music or original audio, creating silent video")
             
             # Write output
             logger.info(f"Rendering video to {output_path}")
@@ -99,21 +123,30 @@ class VideoRenderer:
                 fps=self.fps,
                 codec='libx264',
                 audio_codec='aac',
+                bitrate=bitrate if 'bitrate' in locals() else self.bitrate,
+                preset='slow' if not preview_mode else 'medium',  # Better quality compression
+                audio_bitrate="192k",  # High quality audio
                 temp_audiofile=tempfile.mktemp('.m4a'),
-                remove_temp=True,
-                preset='fast' if preview_mode else 'medium'
+                remove_temp=True
             )
-            
-            # Clean up
-            video.close()
-            for clip in clips:
-                clip.close()
             
             return output_path
             
         except Exception as e:
             logger.error(f"Video rendering failed: {e}")
             raise
+            
+        finally:
+            # Clean up ALL clips including video and any created during processing
+            if video:
+                video.close()
+            # Clean up all tracked clips
+            for clip in all_clips_to_cleanup:
+                if clip:
+                    try:
+                        clip.close()
+                    except Exception:
+                        pass  # Ignore errors during cleanup
     
     async def _create_clip_from_segment(
         self,
@@ -134,13 +167,22 @@ class VideoRenderer:
             elif media.type == MediaType.VIDEO:
                 logger.debug(f"Creating video clip for {media.file_path}")
                 clip = self._create_video_clip(media, segment, resolution)
+                
+                # Handle audio mixing for this specific segment
+                if clip.audio and segment.preserve_original_audio:
+                    # Adjust the original audio volume for this segment
+                    clip = clip.volumex(segment.original_audio_volume)
+                    logger.debug(f"Preserving original audio at {segment.original_audio_volume*100:.0f}% volume")
+                elif clip.audio and not segment.preserve_original_audio:
+                    # Mute the original audio for this segment
+                    clip = clip.without_audio()
+                    logger.debug(f"Muting original audio from video clip")
             else:
                 logger.warning(f"Unsupported media type: {media.type}")
                 return None
             
             # Apply effects
-            if "ken_burns" in segment.effects:
-                clip = self._apply_ken_burns(clip, segment.duration)
+            # Note: Ken Burns effect removed - not implemented
             
             return clip
             
@@ -191,17 +233,17 @@ class VideoRenderer:
             else:
                 logger.warning(f"In point {in_point} exceeds video duration {clip.duration}, using full clip")
         
-        # For very short clips that need to be extended
+        # Adjust clip duration to match segment duration
         if clip.duration < segment.duration:
-            # Calculate how many loops we need
-            loops_needed = int(segment.duration / clip.duration) + 1
-            logger.debug(f"Looping clip {loops_needed} times to reach {segment.duration:.2f}s")
-            
-            # Loop the clip
-            clip = clip.loop(n=loops_needed)
-            
-            # Trim to exact duration
-            clip = clip.subclip(0, segment.duration)
+            # Pad with black frames to match expected duration
+            logger.warning(f"Clip duration ({clip.duration:.2f}s) shorter than segment ({segment.duration:.2f}s). Padding with black.")
+            # Create a black clip for the remaining duration
+            padding_duration = segment.duration - clip.duration
+            black_padding = ColorClip(size=clip.size, color=(0, 0, 0), duration=padding_duration)
+            # Concatenate the clip with black padding
+            from moviepy.editor import concatenate_videoclips
+            # Note: This creates a new clip, original clip and black_padding are embedded
+            clip = concatenate_videoclips([clip, black_padding])
         elif clip.duration > segment.duration:
             # Trim to exact duration
             clip = clip.subclip(0, segment.duration)
@@ -212,77 +254,150 @@ class VideoRenderer:
         return clip
     
     def _resize_clip(self, clip: VideoFileClip, resolution: Tuple[int, int]) -> VideoFileClip:
-        """Resize clip to fit resolution while maintaining aspect ratio."""
+        """Resize clip to fit resolution while maintaining aspect ratio with professional letterboxing."""
         target_w, target_h = resolution
         clip_w, clip_h = clip.size
         
-        # Calculate scale to fit
-        scale = min(target_w / clip_w, target_h / clip_h)
-        new_size = (int(clip_w * scale), int(clip_h * scale))
+        # Calculate aspect ratios
+        target_aspect = target_w / target_h
+        clip_aspect = clip_w / clip_h
         
-        # Resize
-        clip = clip.resize(newsize=new_size)
+        # Determine if we need letterboxing or pillarboxing
+        if abs(clip_aspect - target_aspect) < 0.1:
+            # Similar aspect ratio, just resize to fit exactly
+            clip = clip.resize(newsize=resolution)
+        else:
+            # Calculate scale to fit while maintaining aspect ratio
+            scale = min(target_w / clip_w, target_h / clip_h)
+            new_size = (int(clip_w * scale), int(clip_h * scale))
+            
+            # Ensure dimensions are even (required for many codecs)
+            new_size = (new_size[0] // 2 * 2, new_size[1] // 2 * 2)
+            
+            # Resize with high quality
+            resized_clip = clip.resize(newsize=new_size)
+            
+            # Add professional letterboxing/pillarboxing
+            if new_size != resolution:
+                # Create subtle gradient background instead of pure black
+                # This looks more professional than hard black bars
+                bg = ColorClip(size=resolution, color=(16, 16, 16), duration=resized_clip.duration)
+                
+                # Center the clip
+                x_pos = (target_w - new_size[0]) // 2
+                y_pos = (target_h - new_size[1]) // 2
+                # Note: CompositeVideoClip creates a new clip, bg is embedded
+                clip = CompositeVideoClip([bg, resized_clip.set_position((x_pos, y_pos))])
+            else:
+                clip = resized_clip
         
-        # Center on background if needed
-        if new_size != resolution:
-            # Create black background
-            bg = ColorClip(size=resolution, color=(0, 0, 0), duration=clip.duration)
-            # Center the clip
-            x_pos = (target_w - new_size[0]) // 2
-            y_pos = (target_h - new_size[1]) // 2
-            clip = CompositeVideoClip([bg, clip.set_position((x_pos, y_pos))])
+        # Apply subtle color correction for more professional look
+        # Slightly increase contrast and saturation
+        try:
+            from moviepy.video.fx.colorx import colorx
+            clip = clip.fx(colorx, 1.1)  # Boost colors slightly
+        except:
+            # Skip color correction if not available
+            pass
         
         return clip
     
-    def _apply_ken_burns(self, clip: ImageClip, duration: float) -> ImageClip:
-        """Apply Ken Burns effect (zoom/pan) to image."""
-        # For now, just return the clip as-is
-        # TODO: Implement proper Ken Burns effect with resize over time
-        return clip
+    # Ken Burns effect removed - was not implemented
     
     def _apply_transitions(
         self,
         clips: List[VideoFileClip],
         segments: List[TimelineSegment]
     ) -> List[VideoFileClip]:
-        """Apply transitions between clips."""
+        """Apply transitions between clips.
+        
+        Returns list of clips INCLUDING any newly created transition clips.
+        Caller is responsible for tracking these for cleanup.
+        """
         if len(clips) <= 1:
             return clips
         
         final_clips = []
-        transition_duration = 0.5
+        # Professional transition timing
+        transition_duration = 0.2  # Quick, barely noticeable fades (200ms)
         
         for i, (clip, segment) in enumerate(zip(clips, segments)):
-            if segment.transition_out == TransitionType.CROSSFADE and i < len(clips) - 1:
-                # Apply fade out to current clip
+            # Handle different transition types
+            if segment.transition_out == TransitionType.CUT:
+                # Crash cut - no transition effect, just append the clip
+                final_clips.append(clip)
+                
+            elif segment.transition_out == TransitionType.FADE and i < len(clips) - 1:
+                # Fade transition - fade out current, fade in next
                 clip = fadeout(clip, transition_duration)
-                # Apply fade in to next clip
-                next_clip = clips[i + 1]
-                next_clip = fadein(next_clip, transition_duration)
+                if i + 1 < len(clips):
+                    clips[i + 1] = fadein(clips[i + 1], transition_duration)
+                final_clips.append(clip)
+                
+            elif segment.transition_out == TransitionType.CROSSFADE and i < len(clips) - 1:
+                # Crossfade - overlapping fade
+                clip = fadeout(clip, transition_duration)
+                if i + 1 < len(clips):
+                    clips[i + 1] = fadein(clips[i + 1], transition_duration)
+                final_clips.append(clip)
                 
             elif segment.transition_out == TransitionType.FADE_TO_BLACK:
+                # Fade to black with a brief black pause
                 clip = fadeout(clip, transition_duration)
-                # Add black frame
-                black = ColorClip(size=clip.size, color=(0, 0, 0), duration=0.5)
+                # Create black clip - this is a NEW clip that needs cleanup
+                black = ColorClip(size=clip.size, color=(0, 0, 0), duration=0.2)
                 final_clips.append(clip)
-                final_clips.append(black)
-                continue
-            
-            final_clips.append(clip)
+                final_clips.append(black)  # Track this for cleanup
+                
+            else:
+                # Default to cut for any unhandled transition types
+                final_clips.append(clip)
         
         return final_clips
     
-    def _add_audio_track(self, video: VideoFileClip, audio_path: str) -> VideoFileClip:
-        """Add audio track to video."""
+    def _add_audio_track(self, video: VideoFileClip, audio_path: str, timeline: Timeline) -> VideoFileClip:
+        """Add audio track to video, mixing with any preserved original audio."""
         try:
-            audio = AudioFileClip(audio_path)
+            # Load the background music
+            music = AudioFileClip(audio_path)
             
-            # Trim audio to match video duration
-            if audio.duration > video.duration:
-                audio = audio.subclip(0, video.duration)
+            # Trim music to match video duration
+            if music.duration > video.duration:
+                music = music.subclip(0, video.duration)
             
-            # Set audio using set_audio method
-            video = video.set_audio(audio)
+            # Check if video has original audio from segments that preserved it
+            if video.audio is not None:
+                # We already have audio from clips that preserved it with proper volumes
+                # Mix strategy: Either original audio dominates (80/20) or music dominates (20/80)
+                from moviepy.audio.AudioClip import CompositeAudioClip
+                
+                # Determine dominant audio based on segment settings
+                # If any segment has original_audio_volume > 0.5, original dominates
+                # Otherwise, music dominates
+                has_important_audio = any(
+                    seg.preserve_original_audio and seg.original_audio_volume > 0.5 
+                    for seg in timeline.segments
+                )
+                
+                if has_important_audio:
+                    # Original audio dominates (80%), music is subtle background (20%)
+                    music = music.volumex(0.2)
+                    logger.info("Original audio dominant mix (80/20)")
+                else:
+                    # Music dominates (80%), original audio is subtle (20%)
+                    # Note: original audio volumes are already set per segment
+                    music = music.volumex(0.8)
+                    logger.info("Background music dominant mix (20/80)")
+                
+                # Composite the audio tracks
+                mixed_audio = CompositeAudioClip([video.audio, music])
+                
+                # Set the mixed audio
+                video = video.set_audio(mixed_audio)
+            else:
+                # No original audio preserved, just use the background music at full volume
+                video = video.set_audio(music)
+                logger.info("Added background music (no original audio preserved)")
             
             return video
             
@@ -296,7 +411,9 @@ async def render_video(
     project_state: Dict[str, Any],
     output_filename: str = "output.mp4",
     resolution: str = "1920x1080",
-    preview: bool = False
+    preview: bool = False,
+    preserve_original_audio: bool = True,
+    audio_mix_ratio: float = 0.3
 ) -> Dict[str, Any]:
     """Render video from timeline.
     
@@ -325,8 +442,13 @@ async def render_video(
         # Create media asset dictionary
         media_dict = {asset.id: asset for asset in state.user_inputs.media}
         
-        # Determine output path
-        output_dir = Path("./data/renders")
+        # Determine output path - use project directory if available
+        if state.storage_path:
+            output_dir = Path(state.storage_path)
+        else:
+            # Fallback to project-specific directory
+            output_dir = Path(f"./data/projects/{state.project_id}")
+        
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = str(output_dir / output_filename)
         
@@ -344,6 +466,9 @@ async def render_video(
         
         # Update project state
         state.output_path = rendered_path
+        # Add to rendered outputs list
+        if rendered_path not in state.rendered_outputs:
+            state.rendered_outputs.append(rendered_path)
         
         logger.info(f"Video rendered successfully: {rendered_path}")
         

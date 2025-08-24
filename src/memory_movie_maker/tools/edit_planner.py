@@ -21,6 +21,7 @@ from ..models.media_asset import MediaAsset, MediaType, AudioAnalysisProfile
 from ..models.project_state import ProjectState
 from ..models.edit_plan import EditPlan, PlannedSegment
 from ..utils.simple_logger import log_start, log_update, log_complete
+from ..utils.ai_output_logger import ai_logger
 
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,13 @@ class EditPlanner:
         log_update(logger, "Parsing edit plan...")
         edit_plan = self._parse_edit_plan(response)
         
+        # Log to AI output logger
+        ai_logger.log_edit_plan(
+            plan=edit_plan.dict() if hasattr(edit_plan, 'dict') else vars(edit_plan),
+            prompt=prompt,  # Log full prompt
+            raw_response=response
+        )
+        
         log_complete(logger, f"Edit plan created with {len(edit_plan.segments)} segments")
         return edit_plan
     
@@ -90,14 +98,49 @@ class EditPlanner:
     ) -> str:
         """Build a detailed prompt for Gemini."""
         
-        # Format media information
+        # Format media information (already sorted chronologically)
         media_info = []
-        for asset in media_assets:
+        prev_timestamp = None
+        
+        for i, asset in enumerate(media_assets):
             info = {
                 "id": asset.id,
                 "type": asset.type,
-                "file": asset.file_path.split('/')[-1]
+                "file": asset.file_path.split('/')[-1],
+                "file_path": asset.file_path,  # Full path for context
+                "chronological_index": i,  # Position in chronological order
             }
+            
+            # Check if this is likely part of the same event as previous
+            if i > 0 and asset.metadata and media_assets[i-1].metadata:
+                curr_time = asset.metadata.get("chronological_order") or asset.metadata.get("recorded_at")
+                prev_time = media_assets[i-1].metadata.get("chronological_order") or media_assets[i-1].metadata.get("recorded_at")
+                
+                if curr_time and prev_time:
+                    # If timestamps are numeric (chronological_order)
+                    if isinstance(curr_time, (int, float)) and isinstance(prev_time, (int, float)):
+                        time_diff = curr_time - prev_time
+                        # If less than 5 minutes apart, likely same event
+                        if time_diff < 300:
+                            info["likely_same_event_as_previous"] = True
+                            info["seconds_after_previous"] = time_diff
+            
+            # Add important metadata
+            if asset.metadata:
+                if "duration" in asset.metadata:
+                    info["duration"] = asset.metadata["duration"]
+                if "width" in asset.metadata and "height" in asset.metadata:
+                    info["resolution"] = f"{asset.metadata['width']}x{asset.metadata['height']}"
+                if "recorded_at" in asset.metadata:
+                    info["recorded_at"] = asset.metadata["recorded_at"]
+                elif "modified_time" in asset.metadata:
+                    info["recorded_at"] = asset.metadata["modified_time"]  # Fallback
+                if "fps" in asset.metadata:
+                    info["fps"] = asset.metadata["fps"]
+            
+            # For videos, explicitly note the duration
+            if asset.type == "video" and asset.duration:
+                info["duration"] = asset.duration
             
             if asset.gemini_analysis:
                 info["description"] = asset.gemini_analysis.description
@@ -198,11 +241,13 @@ class EditPlanner:
                     ]
         
         # Build the prompt with artistic direction
-        prompt = f"""You are an award-winning video editor creating a compelling memory movie. Your goal is to craft an emotionally resonant video that captures the essence of the memory while maintaining professional editing standards.
+        prompt = f"""You are a professional video editor creating a cohesive video from a collection of photos and videos. 
+The user has provided media from an event, trip, party, or personal collection that they want edited together into 
+a single video that captures and preserves the memories from this experience.
 
 USER REQUEST: {user_prompt}
 TARGET DURATION: {target_duration} seconds
-STYLE: {style_preferences.get('style', 'auto')}
+EDITING STYLE: {style_preferences.get('style', 'balanced')}
 
 AVAILABLE MEDIA:
 {json.dumps(media_info, indent=2)}
@@ -216,11 +261,23 @@ CREATIVE GUIDELINES:
    - Use story beats: Establishing shot → Development → Climax → Resolution
    - Each segment should advance the story or emotional journey
 
-2. VARIETY & PACING:
-   - Avoid repetition - don't use the same clip multiple times unless for artistic effect
-   - Vary shot lengths: mix quick cuts (1-2s) with longer moments (3-5s)
-   - Balance different types of shots (wide/close, static/dynamic)
-   - Create rhythm through editing, not just following music
+2. PROFESSIONAL PACING & COMPOSITION:
+   - CRITICAL: Never repeat the same clip - each media_id should appear ONLY ONCE in the edit
+   - IMPORTANT: Use trim_start and trim_end to select DIFFERENT portions of long videos
+   - For videos: Always specify trim_start/trim_end to extract the EXACT segment needed
+   - Maintain NATURAL playback speed - clips should play at 1x speed (duration = trim_end - trim_start)
+   
+   PROFESSIONAL SHOT LENGTHS:
+   - Quick cuts: 0.5-2s (for energy, montages, beat syncs)
+   - Standard shots: 2-4s (for most content, allows viewer comprehension)
+   - Breathing shots: 4-6s (for emotional moments, establishing shots)
+   - Hero shots: 6-8s MAX (only for truly exceptional moments)
+   - AVOID: Shots under 0.5s (too jarring) or over 8s (loses engagement)
+   
+   RULE OF THIRDS TIMING:
+   - Place visual peaks at 1/3 and 2/3 points in the timeline
+   - Build energy in waves, not a straight line
+   - Use the 3-act structure even in short videos
 
 3. EMOTIONAL IMPACT:
    - Build emotional intensity gradually
@@ -228,17 +285,62 @@ CREATIVE GUIDELINES:
    - Use quieter moments for emotional breathing room
    - End with a memorable, satisfying conclusion
 
-4. TECHNICAL EXCELLENCE:
-   - Prioritize clips with aesthetic scores > 0.6
+4. PROFESSIONAL QUALITY STANDARDS:
+   - MINIMUM aesthetic score: 0.7 (reject anything below unless it's narratively essential)
+   - Prioritize clips with scores > 0.8 for key moments
    - For videos, use the notable_moments identified in analysis
    - Match visual energy to musical energy when possible
-   - Use smooth transitions for emotional scenes, cuts for energy
+   
+   AVOID AMATEUR MISTAKES:
+   - Never use blurry, shaky, or poorly lit clips unless absolutely necessary
+   - Don't put similar shots back-to-back (vary composition)
+   - Avoid jarring aspect ratio changes
+   - Never cut mid-action unless intentional
+   - Don't overuse any single type of shot
+   - IMPORTANT: Use each clip ONLY ONCE - no repetition
+   - For chronological events (concerts, festivals), maintain temporal flow
+   - It's fine NOT to use every video/image provided - quality over quantity
+   - If multiple clips show the same moment/event, pick the BEST ONE only
+   
+   CHRONOLOGICAL AWARENESS & REDUNDANCY HANDLING:
+   - Media files are sorted chronologically (see chronological_index)
+   - Files with similar timestamps likely show the SAME event/performance from different angles
+   - When you have multiple videos of the same moment:
+     * Understand they're showing the SAME thing (e.g., same band performance, same speech)
+     * Choose ONLY the BEST angle/quality - don't use both
+     * Look for clues: similar subjects, matching audio, close timestamps
+     * If unsure, check the descriptions and tags for matches
+   - It's PERFECTLY FINE to skip redundant media - better to have a tight edit than use everything
+   - Respect the natural flow of events unless artistic reasons dictate otherwise
+   
+5. PROFESSIONAL TRANSITION DISCIPLINE:
+   - DEFAULT TO CRASH CUTS: Use "cut" (instant transition) as your primary transition
+   - Crash cuts create energy, maintain pace, and feel modern/professional
+   - ONLY use special transitions when there's a specific reason:
+     * "fade": Major scene changes, time jumps, beginning/ending only
+     * "crossfade": Dreamy sequences, flashbacks (use sparingly - max 2-3 per video)
+     * "cut": Everything else (90-95% of transitions should be cuts)
+   
+   PROFESSIONAL TRANSITION RULES:
+   - Cut on action (mid-movement) for seamless flow
+   - Cut on beat for musical videos
+   - Match cut when possible (similar shapes/movements between shots)
+   - J-cuts and L-cuts for dialogue (audio leads or follows video)
+   - NEVER use cheesy transitions (star wipes, spirals, etc.)
 
-5. MUSIC SYNCHRONIZATION (if applicable):
+6. PROFESSIONAL MUSIC SYNCHRONIZATION:
+   - BEAT PRECISION: Cuts should land EXACTLY on beat, not "near" the beat
    - Place key visual moments on strong beats and musical transitions
    - Match cutting rhythm to tempo: Fast music = shorter clips
    - Use energy curve: High energy → dynamic cuts, Low energy → longer takes
    - Leave space for the music to breathe
+   
+   PROFESSIONAL SYNC TECHNIQUES:
+   - Hit the downbeat (1st beat of measure) for major changes
+   - Use snare hits for impact cuts
+   - Sync visual peaks with musical crescendos
+   - Create visual "drops" that match musical drops
+   - Pull back during musical bridges for contrast
    
    IMPORTANT: If detailed musical segments are provided:
    - Sync major visual transitions with musical structure changes (verse→chorus, buildup→drop)
@@ -247,7 +349,7 @@ CREATIVE GUIDELINES:
    - Cut on "recommended_cut_points" for natural flow
    - Match visual energy to "energy_transition" states (building, dropping, peak, valley)
 
-6. VIDEO AUDIO INTEGRATION:
+7. VIDEO AUDIO INTEGRATION:
    - If video contains speech, preserve complete sentences/phrases when possible
    - Use "video_audio.recommended_cuts" for natural audio break points
    - Match emotional tone of video speech with overall mood
@@ -255,6 +357,21 @@ CREATIVE GUIDELINES:
    - Respect "sync_priority" in video segments for important audio-visual moments
    - If video has dialogue, ensure important speech is not cut mid-sentence
    - Use sound effects timing to enhance transitions (e.g., door closing as transition point)
+
+8. INTELLIGENT AUDIO MIXING DECISIONS:
+   - For each video segment, decide whether to preserve its original audio
+   - Consider preserving original audio when:
+     * Video contains important dialogue or narration
+     * Ambient sounds enhance the atmosphere (waves, laughter, etc.)
+     * Sound effects add impact (door closing, applause, etc.)
+     * Video has its own music that complements the background track
+   - Set original_audio_volume DECISIVELY (avoid muddy 50/50 mixing):
+     * 0.8-1.0: Important dialogue, speeches, live performances (original DOMINATES)
+     * 0.1-0.2: Ambient crowd noise, background sounds (music DOMINATES)
+     * 0.0: Mute original audio completely (music only)
+     * NEVER USE 0.3-0.7: This creates dissonant mixing - be decisive!
+   - The system will automatically mix at 80/20 ratio based on your choice
+   - Provide audio_reasoning to explain which track should dominate
 
 Return a complete edit plan as JSON:
 {{
@@ -265,7 +382,10 @@ Return a complete edit plan as JSON:
       "duration": 3.0,
       "trim_start": 0.0,
       "trim_end": 3.0,
-      "transition_type": "fade",
+      "transition_type": "cut",  // Options: "cut" (instant), "fade", "crossfade" - use cut by default
+      "preserve_original_audio": true/false,
+      "original_audio_volume": 0.5,
+      "audio_reasoning": "Preserving dialogue at 50% to layer with music...",
       "reasoning": "Establishes setting with wide shot...",
       "story_beat": "introduction",
       "energy_match": 0.7
@@ -281,11 +401,21 @@ Return a complete edit plan as JSON:
   "reasoning_summary": "This edit emphasizes the journey aspect..."
 }}
 
-REMEMBER:
-- Every clip choice should be intentional and justified
-- Create a video that viewers will want to watch multiple times
+PROFESSIONAL EDITING PRINCIPLES:
+- Every frame matters - no filler content
+- Hook viewers in the first 3 seconds
+- Create a video that feels expensive and polished
 - Balance technical precision with emotional authenticity
-- The whole should be greater than the sum of its parts"""
+- The whole should be greater than the sum of its parts
+
+QUALITY CHECKLIST:
+✓ Opening shot grabs attention immediately
+✓ Each shot advances the story or emotion
+✓ Transitions are invisible (cuts) or purposeful (fades)
+✓ Music and visuals are perfectly synchronized
+✓ Pacing creates and releases tension appropriately
+✓ Ending provides satisfying closure
+✓ Overall feels broadcast/commercial quality"""
 
         return prompt
     
@@ -344,10 +474,14 @@ REMEMBER:
                     duration=float(seg_data["duration"]),
                     trim_start=float(seg_data.get("trim_start", 0.0)),
                     trim_end=float(seg_data.get("trim_end")) if seg_data.get("trim_end") else None,
-                    transition_type=seg_data.get("transition_type", "crossfade"),
+                    transition_type=seg_data.get("transition_type", "cut"),  # Default to cut, not crossfade
                     reasoning=seg_data.get("reasoning", ""),
                     story_beat=seg_data.get("story_beat"),
-                    energy_match=float(seg_data["energy_match"]) if seg_data.get("energy_match") else None
+                    energy_match=float(seg_data["energy_match"]) if seg_data.get("energy_match") else None,
+                    # Audio mixing fields
+                    preserve_original_audio=seg_data.get("preserve_original_audio", False),
+                    original_audio_volume=float(seg_data.get("original_audio_volume", 0.3)),
+                    audio_reasoning=seg_data.get("audio_reasoning")
                 )
                 segments.append(segment)
                 
@@ -426,7 +560,7 @@ async def plan_edit(
             }
         
         # Get user prompt
-        user_prompt = state.user_inputs.initial_prompt or "Create a compelling memory movie"
+        user_prompt = state.user_inputs.initial_prompt or "Create a cohesive video from these media files"
         
         # Style preferences
         style_prefs = {

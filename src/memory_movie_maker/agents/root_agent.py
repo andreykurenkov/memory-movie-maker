@@ -20,6 +20,8 @@ from ..agents.composition_agent import CompositionAgent
 from ..agents.evaluation_agent import EvaluationAgent  
 from ..agents.refinement_agent import RefinementAgent
 from ..utils.simple_logger import log_start, log_complete
+from ..utils.ai_output_logger import ai_logger
+from ..tools.video_evaluation import cleanup_video_cache
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +53,10 @@ class RootAgent:
         music_path: Optional[str] = None,
         target_duration: int = 60,
         style: str = "auto",
-        auto_refine: bool = True
+        aspect_ratio: str = "16:9",
+        auto_refine: bool = True,
+        save_analysis: bool = True,
+        preview_mode: bool = False
     ) -> Dict[str, Any]:
         """Main entry point for creating a memory movie.
         
@@ -61,7 +66,10 @@ class RootAgent:
             music_path: Optional path to background music
             target_duration: Target video duration in seconds
             style: Style preference (auto, smooth, dynamic, fast)
+            aspect_ratio: Video aspect ratio ("16:9", "9:16", "4:3", "1:1", "21:9")
             auto_refine: Whether to auto-refine using evaluation
+            save_analysis: Whether to save AI analysis report
+            preview_mode: If True, render in lower quality for speed
             
         Returns:
             Result dictionary with video path and metadata
@@ -72,8 +80,27 @@ class RootAgent:
             # Phase 1: Initialize project
             logger.info("Phase 1: Initializing project")
             project_state = await self._initialize_project(
-                media_paths, user_prompt, music_path, target_duration, style
+                media_paths, user_prompt, music_path, target_duration, style, aspect_ratio
             )
+            
+            # Create project directory
+            project_dir = Path(f"data/projects/{project_state.project_id}")
+            project_dir.mkdir(parents=True, exist_ok=True)
+            project_state.storage_path = str(project_dir)
+            logger.info(f"Created project directory: {project_dir}")
+            
+            # Initialize AI output logger if saving analysis
+            logger.info(f"save_analysis flag: {save_analysis}")
+            if save_analysis:
+                logger.info(f"Initializing AI output logger for project {project_state.project_id}")
+                ai_logger.set_project(
+                    project_id=project_state.project_id,
+                    user_prompt=user_prompt,
+                    output_dir=str(project_dir),
+                    auto_save=True  # Save after each log entry
+                )
+            else:
+                logger.info("AI output logging is disabled")
             
             # Save initial state
             await self._save_project_state(project_state)
@@ -86,7 +113,8 @@ class RootAgent:
             logger.info("Phase 3: Creating initial video")
             project_state = await self.composition_agent.create_memory_movie(
                 project_state=project_state,
-                style=style
+                style=style,
+                preview_only=preview_mode
             )
             
             if not auto_refine:
@@ -105,10 +133,18 @@ class RootAgent:
             while refinement_count < self.max_refinement_iterations:
                 logger.info(f"Phase 4: Self-correction iteration {refinement_count + 1}")
                 
-                # Evaluate current video
+                # Evaluate current video with iteration tracking
                 evaluation_result = await self.evaluation_agent.evaluate_memory_movie(
                     project_state=project_state
                 )
+                
+                # Update iteration in logger
+                if save_analysis and evaluation_result["status"] == "success":
+                    ai_logger.log_evaluation(
+                        video_path=project_state.output_path,
+                        evaluation=evaluation_result["evaluation"],
+                        iteration=refinement_count
+                    )
                 
                 if evaluation_result["status"] != "success":
                     logger.error(f"Evaluation failed: {evaluation_result.get('error')}")
@@ -132,7 +168,8 @@ class RootAgent:
                     project_state.timeline = None
                     project_state = await self.composition_agent.create_memory_movie(
                         project_state=project_state,
-                        style=style
+                        style=style,
+                        preview_only=preview_mode
                     )
                 else:
                     # Apply refinements
@@ -145,6 +182,14 @@ class RootAgent:
                     )
                     
                     if refinement_result["status"] == "success":
+                        # Log refinement
+                        if save_analysis:
+                            ai_logger.log_refinement(
+                                feedback=str(evaluation),
+                                commands=refinement_result["edit_commands"],
+                                iteration=refinement_count
+                            )
+                        
                         # Apply edits
                         project_state = await self.composition_agent.apply_edit_commands(
                             project_state=project_state,
@@ -155,7 +200,8 @@ class RootAgent:
                         project_state = await self.composition_agent.create_memory_movie(
                             project_state=project_state,
                             style=style,
-                            skip_composition=True  # Keep existing timeline
+                            skip_composition=True,  # Keep existing timeline
+                            preview_only=preview_mode
                         )
                 
                 refinement_count += 1
@@ -165,15 +211,29 @@ class RootAgent:
             project_state.status.phase = "completed"
             project_state.status.progress = 100
             
+            # Generate and save AI analysis report
+            if save_analysis:
+                final_video_path = project_state.output_path
+                video_duration = project_state.timeline.total_duration if project_state.timeline else target_duration
+                
+                try:
+                    analysis_report_path = ai_logger.save_report(
+                        final_video_path=final_video_path,
+                        total_duration=video_duration
+                    )
+                    project_state.ai_analysis_log_path = analysis_report_path
+                    logger.info(f"AI analysis report saved to: {analysis_report_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to save AI analysis report: {e}")
+            
             # Save final state
             await self._save_project_state(project_state)
             
-            final_video_path = project_state.output_path
             final_score = project_state.evaluation_results.get("overall_score", 0) if project_state.evaluation_results else 0
             
             log_complete(logger, f"Memory movie created: {final_video_path}")
             
-            return {
+            result = {
                 "status": "success",
                 "video_path": final_video_path,
                 "project_state": project_state,
@@ -182,8 +242,18 @@ class RootAgent:
                 "message": f"Video created with {refinement_count} refinement iterations"
             }
             
+            if project_state.ai_analysis_log_path:
+                result["ai_analysis_report"] = project_state.ai_analysis_log_path
+            
+            # Clean up cached video uploads from evaluation
+            cleanup_video_cache()
+            
+            return result
+            
         except Exception as e:
             logger.error(f"Failed to create memory movie: {e}")
+            # Clean up on error too
+            cleanup_video_cache()
             return {
                 "status": "error",
                 "error": str(e)
@@ -192,7 +262,8 @@ class RootAgent:
     async def process_user_feedback(
         self,
         project_state: ProjectState,
-        user_feedback: str
+        user_feedback: str,
+        preview_mode: bool = False
     ) -> Dict[str, Any]:
         """Process user feedback and apply changes.
         
@@ -243,7 +314,8 @@ class RootAgent:
                     project_state = await self.composition_agent.create_memory_movie(
                         project_state=project_state,
                         style=style,
-                        skip_composition=True
+                        skip_composition=True,
+                        preview_only=preview_mode
                     )
                     
                     # Save updated state
@@ -261,7 +333,8 @@ class RootAgent:
                 style = project_state.user_inputs.style_preferences.get("style", "auto")
                 project_state = await self.composition_agent.create_memory_movie(
                     project_state=project_state,
-                    style=style
+                    style=style,
+                    preview_only=preview_mode
                 )
                 
                 await self._save_project_state(project_state)
@@ -291,7 +364,8 @@ class RootAgent:
         user_prompt: str,
         music_path: Optional[str],
         target_duration: int,
-        style: str
+        style: str,
+        aspect_ratio: str = "16:9"
     ) -> ProjectState:
         """Initialize project state from user inputs."""
         # Create media assets
@@ -302,11 +376,8 @@ class RootAgent:
         for path in media_paths:
             media_type = self._detect_media_type(path)
             if media_type:
-                # Get basic metadata
-                metadata = {}
-                if media_type == MediaType.VIDEO:
-                    # Will be populated during analysis
-                    metadata["duration"] = None
+                # Get metadata for the file
+                metadata = await self._extract_media_metadata(path, media_type)
                 
                 asset = MediaAsset(
                     id=str(uuid.uuid4()),
@@ -315,6 +386,39 @@ class RootAgent:
                     metadata=metadata
                 )
                 media_assets.append(asset)
+        
+        # Sort media chronologically based on metadata
+        # Priority: chronological_order (from filename) > recorded_at > modified_time > filename
+        def get_sort_key(asset):
+            if not asset.metadata:
+                return (float('inf'), asset.file_path)
+            
+            # Try chronological_order first (timestamp from filename)
+            if "chronological_order" in asset.metadata:
+                return (asset.metadata["chronological_order"], asset.file_path)
+            
+            # Try recorded_at (from EXIF or filename)
+            if "recorded_at" in asset.metadata:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(asset.metadata["recorded_at"])
+                    return (dt.timestamp(), asset.file_path)
+                except:
+                    pass
+            
+            # Fall back to modified_time
+            if "modified_time" in asset.metadata:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(asset.metadata["modified_time"])
+                    return (dt.timestamp(), asset.file_path)
+                except:
+                    pass
+            
+            # Last resort: sort by filename
+            return (float('inf'), asset.file_path)
+        
+        media_assets.sort(key=get_sort_key)
         
         # Add music if provided
         if music_path:
@@ -325,13 +429,16 @@ class RootAgent:
                 metadata={"role": "background_music"}
             )
             music_assets.append(music_asset)
+            # Also add to media_assets so it gets analyzed
+            media_assets.append(music_asset)
         
         # Create user inputs
         user_inputs = UserInputs(
-            media=media_assets,
-            music=music_assets,
+            media=media_assets,  # All media including music
+            music=music_assets,  # Only music tracks
             initial_prompt=user_prompt,
             target_duration=target_duration,
+            aspect_ratio=aspect_ratio,  # Will be converted to enum by validator
             style_preferences={"style": style}
         )
         
@@ -360,6 +467,77 @@ class RootAgent:
             return MediaType.AUDIO
         
         return None
+    
+    async def _extract_media_metadata(self, file_path: str, media_type: MediaType) -> Dict[str, Any]:
+        """Extract metadata from media file."""
+        import os
+        from datetime import datetime
+        
+        metadata = {}
+        
+        # Get file stats
+        try:
+            stat = os.stat(file_path)
+            metadata["file_size"] = stat.st_size
+            metadata["modified_time"] = datetime.fromtimestamp(stat.st_mtime).isoformat()
+            
+            # Extract filename without extension for chronological hints
+            filename = Path(file_path).stem
+            # Check if filename contains date pattern (e.g., 20250719_172225)
+            if filename[:8].isdigit() and len(filename) >= 15:
+                try:
+                    # Parse YYYYMMDD_HHMMSS format
+                    date_str = filename[:8]
+                    time_str = filename[9:15] if len(filename) > 9 else "000000"
+                    recorded_time = datetime.strptime(f"{date_str}_{time_str}", "%Y%m%d_%H%M%S")
+                    metadata["recorded_at"] = recorded_time.isoformat()
+                    metadata["chronological_order"] = recorded_time.timestamp()
+                except:
+                    pass
+        except Exception as e:
+            logger.debug(f"Could not extract file stats for {file_path}: {e}")
+        
+        # For videos, try to get duration and resolution using moviepy
+        if media_type == MediaType.VIDEO:
+            try:
+                from moviepy.editor import VideoFileClip
+                with VideoFileClip(file_path) as clip:
+                    metadata["duration"] = clip.duration
+                    metadata["width"] = clip.w
+                    metadata["height"] = clip.h
+                    metadata["fps"] = clip.fps
+                    metadata["resolution"] = f"{clip.w}x{clip.h}"
+            except Exception as e:
+                logger.debug(f"Could not extract video metadata for {file_path}: {e}")
+        
+        # For images, try to get dimensions
+        elif media_type == MediaType.IMAGE:
+            try:
+                from PIL import Image
+                with Image.open(file_path) as img:
+                    metadata["width"] = img.width
+                    metadata["height"] = img.height
+                    metadata["resolution"] = f"{img.width}x{img.height}"
+                    # Try to get EXIF data
+                    if hasattr(img, '_getexif') and img._getexif():
+                        exif = img._getexif()
+                        # Common EXIF tags
+                        if 36867 in exif:  # DateTimeOriginal
+                            metadata["recorded_at"] = str(exif[36867])
+            except Exception as e:
+                logger.debug(f"Could not extract image metadata for {file_path}: {e}")
+        
+        # For audio files
+        elif media_type == MediaType.AUDIO:
+            try:
+                import librosa
+                y, sr = librosa.load(file_path, sr=None, duration=1)  # Load just 1 second for metadata
+                metadata["sample_rate"] = sr
+                # Full duration will be extracted during analysis
+            except Exception as e:
+                logger.debug(f"Could not extract audio metadata for {file_path}: {e}")
+        
+        return metadata
     
     async def _save_project_state(self, project_state: ProjectState):
         """Save project state to storage."""

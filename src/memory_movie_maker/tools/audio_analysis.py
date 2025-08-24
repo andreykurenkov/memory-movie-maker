@@ -10,6 +10,7 @@ import tempfile
 
 from ..models.media_asset import AudioAnalysisProfile, AudioVibe
 from ..storage.interface import StorageInterface
+from ..utils.ai_output_logger import ai_logger
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class AudioAnalysisTool:
             vibe = await self._analyze_vibe(y, sr)
             
             # Create profile
-            return AudioAnalysisProfile(
+            profile = AudioAnalysisProfile(
                 file_path=audio_path,
                 beat_timestamps=beats.tolist(),
                 tempo_bpm=tempo,
@@ -57,6 +58,15 @@ class AudioAnalysisTool:
                 vibe=vibe,
                 sections=[]  # Could be implemented later with segment analysis
             )
+            
+            # Log to AI output logger
+            ai_logger.log_audio_analysis(
+                file_path=audio_path,
+                analysis_type="technical",
+                analysis=profile.dict() if hasattr(profile, 'dict') else vars(profile)
+            )
+            
+            return profile
             
         except Exception as e:
             logger.error(f"Failed to analyze audio {audio_path}: {e}")
@@ -110,8 +120,8 @@ class AudioAnalysisTool:
             
             # Resample to ~10 values per second for storage efficiency
             target_rate = 10  # Hz
-            current_rate = sr / hop_length
-            resample_factor = target_rate / current_rate
+            current_rate = sr / hop_length if hop_length > 0 else sr / 512
+            resample_factor = target_rate / current_rate if current_rate > 0 else 1.0
             
             from scipy.signal import resample
             target_length = int(len(smoothed) * resample_factor)

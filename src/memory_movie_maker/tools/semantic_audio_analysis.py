@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from google import genai
 from ..config import settings
 from ..storage.interface import StorageInterface
+from ..utils.ai_output_logger import ai_logger
 
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,9 @@ class SemanticAudioAnalysis(BaseModel):
     musical_structure_summary: Optional[str] = Field(None, description="Overview of song structure")
     energy_peaks: Optional[List[float]] = Field(None, description="Timestamps of energy peaks for impact moments")
     recommended_cut_points: Optional[List[float]] = Field(None, description="Best timestamps for video cuts")
+    
+    # LLM prompt used (excluded from serialization for LLM inputs)
+    llm_prompt: Optional[str] = Field(None, exclude=True, description="Prompt sent to LLM")
 
 
 class SemanticAudioAnalysisTool:
@@ -62,7 +66,7 @@ class SemanticAudioAnalysisTool:
         """
         self.storage = storage
         self._client = genai.Client(api_key=settings.gemini_api_key)
-        self._model_name = "gemini-2.0-flash"
+        self._model_name = settings.get_gemini_model_name()
         
     async def analyze_audio_semantics(self, audio_path: str) -> SemanticAudioAnalysis:
         """Analyze audio for semantic content and meaning.
@@ -101,14 +105,26 @@ class SemanticAudioAnalysisTool:
                 lambda: self._client.files.upload(file=audio_path)
             )
             
-            # Wait for processing
-            while audio_file.state == "PROCESSING":
-                await asyncio.sleep(1)
+            # Wait for processing with timeout
+            max_retries = 60  # Max 60 seconds wait
+            retry_count = 0
+            wait_time = 1  # Start with 1 second
+            
+            while audio_file.state == "PROCESSING" and retry_count < max_retries:
+                await asyncio.sleep(wait_time)
+                retry_count += 1
+                
+                # Exponential backoff up to 5 seconds
+                wait_time = min(wait_time * 1.2, 5)
+                
                 if audio_file and hasattr(audio_file, 'name'):
                     audio_file = await loop.run_in_executor(
                         None,
                         lambda: self._client.files.get(name=audio_file.name)
                     )
+            
+            if retry_count >= max_retries:
+                raise Exception(f"Audio upload timed out after {max_retries} seconds")
             
             if audio_file.state == "FAILED":
                 raise Exception(f"Audio upload failed: {audio_file.error}")
@@ -253,7 +269,9 @@ Be extremely precise with timestamps - video editors need exact frame-accurate t
                 # Musical structure overview fields
                 musical_structure_summary=result_data.get("musical_structure_summary"),
                 energy_peaks=result_data.get("energy_peaks"),
-                recommended_cut_points=result_data.get("recommended_cut_points")
+                recommended_cut_points=result_data.get("recommended_cut_points"),
+                # Include the prompt
+                llm_prompt=prompt
             )
             
         except Exception as e:
@@ -270,7 +288,8 @@ Be extremely precise with timestamps - video editors need exact frame-accurate t
                 sound_elements={},
                 musical_structure_summary=None,
                 energy_peaks=None,
-                recommended_cut_points=None
+                recommended_cut_points=None,
+                llm_prompt=prompt if 'prompt' in locals() else None
             )
     
     async def _cleanup_file(self, file: Any) -> None:
@@ -303,6 +322,15 @@ async def analyze_audio_semantics(file_path: str, storage: Optional[StorageInter
     try:
         analyzer = SemanticAudioAnalysisTool(storage)
         analysis = await analyzer.analyze_audio_semantics(file_path)
+        
+        # Log to AI output logger (extract prompt from analysis)
+        ai_logger.log_audio_analysis(
+            file_path=file_path,
+            analysis_type="semantic",
+            analysis=analysis.model_dump(exclude={'llm_prompt'}),  # Exclude prompt from the analysis dict
+            prompt=analysis.llm_prompt,
+            raw_response=None  # Could capture raw response if needed
+        )
         
         return {
             "status": "success",

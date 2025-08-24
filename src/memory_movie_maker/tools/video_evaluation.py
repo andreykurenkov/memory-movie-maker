@@ -11,6 +11,7 @@ from google.adk.tools import FunctionTool
 
 from ..config import settings
 from ..models.project_state import ProjectState
+from ..utils.ai_output_logger import ai_logger
 
 
 logger = logging.getLogger(__name__)
@@ -19,13 +20,17 @@ logger = logging.getLogger(__name__)
 class VideoEvaluator:
     """Evaluates rendered videos using Gemini's video understanding."""
     
-    def __init__(self, model_name: str = "gemini-2.0-flash"):
+    # Class-level cache for uploaded video files to avoid re-uploading
+    _file_cache: Dict[str, Any] = {}
+    _cache_timestamps: Dict[str, float] = {}
+    
+    def __init__(self, model_name: str = None):
         """Initialize video evaluator.
         
         Args:
-            model_name: Gemini model to use
+            model_name: Gemini model to use (defaults to config)
         """
-        self._model_name = model_name
+        self._model_name = model_name or settings.get_gemini_model_name()
         self._client = genai.Client(api_key=settings.gemini_api_key)
     
     async def evaluate_video(
@@ -43,24 +48,55 @@ class VideoEvaluator:
             Evaluation results with critique and suggestions
         """
         try:
-            # Upload video
-            logger.info(f"Uploading video for evaluation: {video_path}")
-            video_file = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self._client.files.upload(file=video_path)
-            )
+            # Check if we have a cached upload for this video
+            import os
+            file_stat = os.stat(video_path)
+            cache_key = f"{video_path}:{file_stat.st_mtime}:{file_stat.st_size}"
             
-            # Wait for processing
-            await asyncio.sleep(2)
+            if cache_key in VideoEvaluator._file_cache:
+                logger.info(f"Using cached upload for: {video_path}")
+                video_file = VideoEvaluator._file_cache[cache_key]
+                
+                # Check if the cached file is still active
+                try:
+                    file_info = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: self._client.files.get(name=video_file.name)
+                    )
+                    if file_info.state != "ACTIVE":
+                        logger.warning(f"Cached file no longer active, re-uploading")
+                        del VideoEvaluator._file_cache[cache_key]
+                        video_file = None
+                except Exception as e:
+                    logger.warning(f"Cached file check failed, re-uploading: {e}")
+                    del VideoEvaluator._file_cache[cache_key]
+                    video_file = None
+            else:
+                video_file = None
             
-            # Check file status
-            file_info = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self._client.files.get(name=video_file.name)
-            )
-            
-            if file_info.state != "ACTIVE":
-                logger.warning(f"File not ready: {file_info.state}")
+            # Upload if not cached or cache invalid
+            if video_file is None:
+                logger.info(f"Uploading video for evaluation: {video_path}")
+                video_file = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self._client.files.upload(file=video_path)
+                )
+                
+                # Cache the upload
+                VideoEvaluator._file_cache[cache_key] = video_file
+                VideoEvaluator._cache_timestamps[cache_key] = asyncio.get_event_loop().time()
+                
+                # Wait for processing
+                await asyncio.sleep(2)
+                
+                # Check file status
+                file_info = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self._client.files.get(name=video_file.name)
+                )
+                
+                if file_info.state != "ACTIVE":
+                    logger.warning(f"File not ready: {file_info.state}")
             
             # Create evaluation prompt
             prompt = self._create_evaluation_prompt(project_context)
@@ -77,14 +113,18 @@ class VideoEvaluator:
             # Parse response
             critique = self._parse_evaluation_response(response.text)
             
-            # Clean up
-            try:
-                await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self._client.files.delete(name=video_file.name)
-                )
-            except Exception as e:
-                logger.warning(f"Failed to delete uploaded file: {e}")
+            # Log to AI output logger
+            ai_logger.log_evaluation(
+                video_path=video_path,
+                evaluation=critique,
+                iteration=0,  # Will be updated by caller if needed
+                prompt=prompt,  # Include the prompt
+                raw_response=response.text
+            )
+            
+            # Don't delete the file - keep it cached for potential re-evaluation
+            # Files will be cleaned up when session ends or after timeout
+            logger.debug(f"Keeping uploaded file cached: {video_file.name}")
             
             return {
                 "status": "success",
@@ -104,7 +144,7 @@ class VideoEvaluator:
         style = context.get("style", "auto")
         target_duration = context.get("target_duration", 60)
         
-        return f"""You are an expert video editor evaluating a generated memory movie.
+        return f"""You are an expert video editor evaluating a video that was automatically generated from a collection of photos and videos.
 
 Original Request: "{user_prompt}"
 Style: {style}
@@ -145,12 +185,29 @@ Please evaluate this video and provide a detailed critique in the following JSON
     "recommendation": "minor_adjustments"  // "accept", "minor_adjustments", "major_rework"
 }}
 
-Be specific and constructive in your critique. Focus on:
-1. Pacing and rhythm synchronization
-2. Visual storytelling and flow
-3. Technical quality (resolution, transitions, effects)
-4. Emotional impact and engagement
-5. Adherence to the requested style"""
+Be specific and constructive in your critique. Apply PROFESSIONAL BROADCAST STANDARDS:
+
+SCORING RUBRIC (be strict):
+- 9-10: Broadcast/commercial quality, could air on TV
+- 7-8: Very good, minor issues only
+- 5-6: Acceptable but needs work
+- 3-4: Amateur, significant issues
+- 1-2: Poor quality, major rework needed
+
+EVALUATION CRITERIA:
+1. PACING (20%): Rhythm, tempo changes, breathing room
+2. MUSIC SYNC (20%): Cuts on beat, visual peaks match audio
+3. VISUAL FLOW (20%): Story progression, shot variety, composition
+4. TECHNICAL (20%): Resolution, color, transitions, stability
+5. EMOTIONAL IMPACT (20%): Engagement, mood, satisfying conclusion
+
+COMMON ISSUES TO CHECK:
+- Cuts not on beat
+- Shots too long/short for content
+- Poor quality clips used
+- Jarring transitions
+- Weak opening or ending
+- Mismatched energy between audio and video"""
     
     def _parse_evaluation_response(self, response_text: str) -> Dict[str, Any]:
         """Parse evaluation response from Gemini."""
@@ -252,6 +309,21 @@ async def evaluate_video(
             "status": "error",
             "error": str(e)
         }
+
+
+def cleanup_video_cache():
+    """Clean up cached video uploads. Call this at session end."""
+    if VideoEvaluator._file_cache:
+        logger.info(f"Cleaning up {len(VideoEvaluator._file_cache)} cached video uploads")
+        client = genai.Client(api_key=settings.gemini_api_key)
+        for cache_key, video_file in VideoEvaluator._file_cache.items():
+            try:
+                client.files.delete(name=video_file.name)
+                logger.debug(f"Deleted cached file: {video_file.name}")
+            except Exception as e:
+                logger.warning(f"Failed to delete cached file {video_file.name}: {e}")
+        VideoEvaluator._file_cache.clear()
+        VideoEvaluator._cache_timestamps.clear()
 
 
 # Create ADK tool

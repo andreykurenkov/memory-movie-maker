@@ -32,9 +32,13 @@ from ..config import settings
 from ..models.media_asset import GeminiAnalysis
 from ..storage.interface import StorageInterface
 from ..utils.simple_logger import log_start, log_update, log_complete
+from ..utils.ai_output_logger import ai_logger
 
 
 logger = logging.getLogger(__name__)
+
+# Module-level analyzer instance for reuse
+_analyzer_instance: Optional['VisualAnalysisTool'] = None
 
 
 class VisualAnalysisTool:
@@ -106,6 +110,17 @@ class VisualAnalysisTool:
             log_update(logger, "Parsing analysis results...")
             analysis = self._parse_gemini_response(response)
             
+            # Add prompt to analysis
+            analysis.llm_prompt = prompt
+            
+            # Log to AI output logger
+            ai_logger.log_visual_analysis(
+                file_path=image_path,
+                analysis=analysis.dict(exclude={'llm_prompt'}) if hasattr(analysis, 'dict') else vars(analysis),
+                prompt=prompt,
+                raw_response=response
+            )
+            
             log_complete(logger, f"Image analysis complete - {analysis.description[:50]}...")
             return analysis
             
@@ -141,8 +156,19 @@ class VisualAnalysisTool:
             log_update(logger, "Parsing video analysis results...")
             analysis = self._parse_gemini_response(response)
             
+            # Add prompt to analysis
+            analysis.llm_prompt = prompt
+            
             if analysis.notable_segments:
                 log_update(logger, f"Found {len(analysis.notable_segments)} notable segments")
+            
+            # Log to AI output logger
+            ai_logger.log_visual_analysis(
+                file_path=video_path,
+                analysis=analysis.dict(exclude={'llm_prompt'}) if hasattr(analysis, 'dict') else vars(analysis),
+                prompt=prompt,
+                raw_response=response
+            )
             
             log_complete(logger, f"Video analysis complete - {analysis.description[:50]}...")
             return analysis
@@ -154,16 +180,20 @@ class VisualAnalysisTool:
     
     def _create_image_analysis_prompt(self) -> str:
         """Create the prompt for image analysis."""
-        return """Analyze this image and provide a detailed JSON response with the following structure:
+        return """Analyze this image with PROFESSIONAL STANDARDS and provide a detailed JSON response:
 {
   "description": "A clear, concise description of what's in the image",
-  "aesthetic_score": 0.85,  // 0-1 score for visual quality and aesthetics
+  "aesthetic_score": 0.85,  // 0-1 score - BE STRICT: 0.9+ exceptional, 0.7-0.9 good, 0.5-0.7 acceptable, <0.5 poor
   "quality_issues": ["list", "of", "any", "quality", "problems"],
   "main_subjects": ["list", "of", "main", "subjects", "or", "people"],
   "tags": ["relevant", "tags", "for", "categorization"]
 }
 
-Be accurate and objective in your analysis. For images, notable_segments, overall_motion, and scene_changes are not applicable and should be omitted."""
+SCORING GUIDELINES (be critical):
+- Deduct for: blur, noise, poor lighting, bad framing, distracting backgrounds
+- Reward for: sharp focus, good composition, proper exposure, compelling subjects
+- Most amateur photos should score 0.5-0.7
+- Only truly excellent photos should score above 0.8"""
     
     def _create_video_analysis_prompt(self, video_duration: float) -> str:
         """Create the prompt for full video analysis including audio."""
@@ -435,8 +465,11 @@ async def analyze_visual_media(file_path: str, storage: Optional[StorageInterfac
                 "error": f"Unsupported file type: {mime_type}"
             }
         
-        # Create analyzer only if file type is supported
-        analyzer = VisualAnalysisTool(storage)
+        # Reuse analyzer instance to avoid recreating clients
+        global _analyzer_instance
+        if _analyzer_instance is None:
+            _analyzer_instance = VisualAnalysisTool(storage)
+        analyzer = _analyzer_instance
         
         if mime_type.startswith('image/'):
             # Analyze as image

@@ -9,8 +9,10 @@ from ..tools.composition import compose_timeline_tool
 from ..tools.edit_planner import plan_edit_tool
 from ..tools.video_renderer import render_video_tool
 from ..models.project_state import ProjectState
+from ..models.aspect_ratio import AspectRatio
 from ..storage.interface import StorageInterface
 from ..storage.filesystem import FilesystemStorage
+from ..config import settings
 from ..utils.simple_logger import log_start, log_update, log_complete
 
 
@@ -34,7 +36,7 @@ class CompositionAgent(Agent):
         
         super().__init__(
             name="CompositionAgent",
-            model="gemini-2.0-flash",
+            model=settings.get_gemini_model_name(),
             description="Creates intelligent video edits using AI planning and renders final videos",
             instruction="""You are an award-winning video editor using AI to create compelling memory movies.
 
@@ -51,10 +53,13 @@ class CompositionAgent(Agent):
             - Balance variety with coherence
             
             CREATIVE GUIDELINES:
-            - Avoid repetition - each clip should add something new
+            - NEVER repeat the same clip - use each media asset only ONCE
+            - For long videos, use trim points to extract different segments
+            - Maintain natural playback speed (1x) - no slow motion effects
             - Build narrative arcs with beginning, middle, and end
             - Match visual energy to musical dynamics
             - Use the highest quality and most relevant clips
+            - Vary clip lengths: 1-6 seconds typically, 8 seconds maximum
             - Create videos people will want to watch multiple times
             
             TECHNICAL WORKFLOW:
@@ -78,7 +83,7 @@ class CompositionAgent(Agent):
         project_state: ProjectState,
         target_duration: int = 60,
         style: str = "auto",
-        preview_only: bool = True
+        preview_only: bool = False
     ) -> ProjectState:
         """Create a memory movie from analyzed media.
         
@@ -141,13 +146,19 @@ class CompositionAgent(Agent):
             # Determine output filename
             output_name = f"memory_movie_{'preview' if preview_only else 'final'}.mp4"
             
+            # Get resolution based on aspect ratio
+            aspect_ratio = project_state.user_inputs.aspect_ratio
+            if isinstance(aspect_ratio, str):
+                aspect_ratio = AspectRatio.from_string(aspect_ratio)
+            resolution_str = aspect_ratio.get_resolution_string(preview=preview_only)
+            
             # Render video
-            log_update(logger, f"Rendering {'preview' if preview_only else 'final'} video...")
+            log_update(logger, f"Rendering {'preview' if preview_only else 'final'} video at {resolution_str}...")
             from ..tools.video_renderer import render_video
             render_result = await render_video(
                 project_state=project_state.model_dump(),
                 output_filename=output_name,
-                resolution="640x360" if preview_only else "1920x1080",
+                resolution=resolution_str,
                 preview=preview_only
             )
             
@@ -158,7 +169,7 @@ class CompositionAgent(Agent):
             project_state = ProjectState(**render_result["updated_state"])
             
             # Update project phase
-            if project_state.status.phase == "composing":
+            if project_state.status and project_state.status.phase == "composing":
                 project_state.status.phase = "evaluating"
             
             log_complete(logger, f"Video rendered successfully: {render_result['output_path']}")
@@ -195,29 +206,29 @@ class CompositionAgent(Agent):
             if "reorder_segments" in edit_commands:
                 # Reorder segments based on new order
                 new_order = edit_commands["reorder_segments"]
-                segments_dict = {s.media_id: s for s in timeline.segments}
+                segments_dict = {s.media_asset_id: s for s in timeline.segments}
                 timeline.segments = [segments_dict[media_id] for media_id in new_order]
             
             if "adjust_durations" in edit_commands:
                 # Adjust segment durations
                 duration_changes = edit_commands["adjust_durations"]
                 for segment in timeline.segments:
-                    if segment.media_id in duration_changes:
-                        segment.duration = duration_changes[segment.media_id]
+                    if segment.media_asset_id in duration_changes:
+                        segment.duration = duration_changes[segment.media_asset_id]
             
             if "change_transitions" in edit_commands:
                 # Change transition types
                 transition_changes = edit_commands["change_transitions"]
                 for segment in timeline.segments:
-                    if segment.media_id in transition_changes:
-                        segment.transition_out = transition_changes[segment.media_id]
+                    if segment.media_asset_id in transition_changes:
+                        segment.transition_out = transition_changes[segment.media_asset_id]
             
             if "add_effects" in edit_commands:
                 # Add effects to segments
                 effect_changes = edit_commands["add_effects"]
                 for segment in timeline.segments:
-                    if segment.media_id in effect_changes:
-                        segment.effects.extend(effect_changes[segment.media_id])
+                    if segment.media_asset_id in effect_changes:
+                        segment.effects.extend(effect_changes[segment.media_asset_id])
             
             # Recalculate timeline duration and start times
             current_time = 0.0
@@ -272,7 +283,7 @@ async def test_composition_agent():
             media=test_media,
             initial_prompt="Create a test video"
         ),
-        project_status=ProjectStatus(phase="composing")
+        status=ProjectStatus(phase="composing")
     )
     
     # Create and test agent
